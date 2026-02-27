@@ -17,15 +17,16 @@ image-rendering:pixelated;image-rendering:crisp-edges}
 <canvas id="game"></canvas>
 <script>
 // =====================================================
-//  FISHING WIZARD — Phase 1.1
+//  FISHING WIZARD — Phase 1.1 (Landscape)
 //  Boat · Sea · UI Bar · Touch Movement
 // =====================================================
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
-const W = 270;
-const H = 480;
+// --- Landscape internal resolution ---
+const W = 480;
+const H = 270;
 canvas.width = W;
 canvas.height = H;
 ctx.imageSmoothingEnabled = false;
@@ -37,13 +38,15 @@ function canvasPos(cx, cy) {
     return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
 }
 
-const UI_H = 30;
-const WATER_Y = 140;
-const WORLD_W = 1600;
-const SEA_FLOOR_Y = H - 30;
-const BTN_SIZE = 44;
-const BTN_PAD = 40;
+// =====================  CONSTANTS  =====================
+const UI_H = 24;
+const WATER_Y = 100;
+const WORLD_W = 2400;
+const SEA_FLOOR_Y = H - 24;
+const BTN_SIZE = 36;
+const BTN_PAD = 10;
 
+// =====================  GAME STATE  ====================
 const state = {
     time: 0,
     camX: 0,
@@ -53,64 +56,77 @@ const state = {
     fishCap: 10,
     scales: 0,
     boat: {
-        x: 200,
-        y: WATER_Y - 11,
+        x: 300,
+        y: WATER_Y - 10,
         w: 48,
         h: 20,
-        speed: 1.4,
+        speed: 1.6,
         bobOffset: 0
     },
     clouds: [],
     weeds: [],
     sandDetails: [],
+    bubbles: [],
     leftBtnDown: false,
     rightBtnDown: false,
     leftTouchId: null,
     rightTouchId: null
 };
 
+// --- Generate world ---
 function initWorld() {
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 15; i++) {
         state.clouds.push({
             x: Math.random() * WORLD_W,
-            y: UI_H + 6 + Math.random() * 50,
-            w: 20 + Math.random() * 40,
-            h: 8 + Math.random() * 10,
-            speed: 0.05 + Math.random() * 0.12,
-            parallax: 0.2 + Math.random() * 0.3
+            y: UI_H + 4 + Math.random() * 35,
+            w: 20 + Math.random() * 44,
+            h: 6 + Math.random() * 10,
+            speed: 0.04 + Math.random() * 0.1,
+            parallax: 0.15 + Math.random() * 0.3
         });
     }
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 50; i++) {
         state.weeds.push({
             x: 30 + Math.random() * (WORLD_W - 60),
             segments: 3 + Math.floor(Math.random() * 4),
-            segH: 6 + Math.random() * 10,
+            segH: 5 + Math.random() * 10,
             color: Math.random() > 0.5 ? '#2d7a1e' : '#1e6215',
             phase: Math.random() * Math.PI * 2
         });
     }
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 60; i++) {
         state.sandDetails.push({
             x: Math.random() * WORLD_W,
-            y: SEA_FLOOR_Y + 4 + Math.random() * 16,
-            r: 1 + Math.random() * 2.5,
+            y: SEA_FLOOR_Y + 3 + Math.random() * 14,
+            r: 1 + Math.random() * 2,
             color: Math.random() > 0.5 ? '#c8a84e' : '#a08838'
+        });
+    }
+    for (let i = 0; i < 20; i++) {
+        state.bubbles.push({
+            x: Math.random() * WORLD_W,
+            y: WATER_Y + 20 + Math.random() * (SEA_FLOOR_Y - WATER_Y - 40),
+            r: 1 + Math.random() * 2,
+            speed: 0.15 + Math.random() * 0.3,
+            wobble: Math.random() * Math.PI * 2
         });
     }
 }
 initWorld();
 
+// =====================  BUTTON POSITIONS  ==============
 function getLeftBtnRect() {
     return { x: BTN_PAD, y: H - BTN_SIZE - BTN_PAD, w: BTN_SIZE, h: BTN_SIZE };
 }
 function getRightBtnRect() {
-    return { x: BTN_PAD + BTN_SIZE + 10, y: H - BTN_SIZE - BTN_PAD, w: BTN_SIZE, h: BTN_SIZE };
+    return { x: BTN_PAD + BTN_SIZE + 8, y: H - BTN_SIZE - BTN_PAD, w: BTN_SIZE, h: BTN_SIZE };
 }
 
 function ptInRect(px, py, rect) {
     return px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
 }
 
+// =====================  TOUCH HANDLING  ================
 canvas.addEventListener('touchstart', function(e) {
     e.preventDefault();
     const lb = getLeftBtnRect();
@@ -148,6 +164,7 @@ canvas.addEventListener('touchcancel', function(e) {
     state.rightTouchId = null;
 }, { passive: false });
 
+// --- Keyboard for desktop testing ---
 window.addEventListener('keydown', function(e) {
     if (e.key === 'ArrowLeft' || e.key === 'a') state.leftBtnDown = true;
     if (e.key === 'ArrowRight' || e.key === 'd') state.rightBtnDown = true;
@@ -157,21 +174,36 @@ window.addEventListener('keyup', function(e) {
     if (e.key === 'ArrowRight' || e.key === 'd') state.rightBtnDown = false;
 });
 
+// =====================  UPDATE  ========================
 function update() {
     state.time++;
     const boat = state.boat;
+
     if (state.leftBtnDown) boat.x -= boat.speed;
     if (state.rightBtnDown) boat.x += boat.speed;
     boat.x = clamp(boat.x, boat.w / 2, WORLD_W - boat.w / 2);
-    boat.bobOffset = Math.sin(state.time * 0.04) * 2.5;
-    boat.y = WATER_Y - 11 + boat.bobOffset;
+
+    boat.bobOffset = Math.sin(state.time * 0.04) * 2;
+    boat.y = WATER_Y - 10 + boat.bobOffset;
+
     state.camX = clamp(boat.x - W / 2, 0, WORLD_W - W);
+
     for (let c of state.clouds) {
         c.x += c.speed;
         if (c.x > WORLD_W + 50) c.x = -c.w - 10;
     }
+
+    for (let b of state.bubbles) {
+        b.y -= b.speed;
+        b.x += Math.sin(state.time * 0.05 + b.wobble) * 0.3;
+        if (b.y < WATER_Y + 2) {
+            b.y = SEA_FLOOR_Y - 10 - Math.random() * 20;
+            b.x = Math.random() * WORLD_W;
+        }
+    }
 }
 
+// =====================  DRAW  ==========================
 function drawSky() {
     const grad = ctx.createLinearGradient(0, UI_H, 0, WATER_Y);
     grad.addColorStop(0, '#4a90d9');
@@ -200,10 +232,13 @@ function drawClouds() {
 function drawWater() {
     const grad = ctx.createLinearGradient(0, WATER_Y, 0, SEA_FLOOR_Y);
     grad.addColorStop(0, '#1a6ea0');
-    grad.addColorStop(0.4, '#134f78');
-    grad.addColorStop(1, '#0b2040');
+    grad.addColorStop(0.3, '#155a85');
+    grad.addColorStop(0.6, '#0e4268');
+    grad.addColorStop(1, '#081e38');
     ctx.fillStyle = grad;
     ctx.fillRect(0, WATER_Y, W, SEA_FLOOR_Y - WATER_Y);
+
+    // wave surface
     ctx.fillStyle = '#3aadd9';
     for (let x = -4; x < W + 4; x += 4) {
         const worldX = x + state.camX;
@@ -211,13 +246,47 @@ function drawWater() {
                      + Math.sin((worldX * 0.08) + state.time * 0.03) * 1;
         ctx.fillRect(x, waveY - 1, 4, 3);
     }
-    ctx.fillStyle = 'rgba(180, 230, 255, 0.25)';
+
+    // shimmer
+    ctx.fillStyle = 'rgba(180, 230, 255, 0.2)';
     for (let x = 0; x < W; x += 6) {
         const worldX = x + state.camX;
-        const shimmer = Math.sin(worldX * 0.1 + state.time * 0.08);
-        if (shimmer > 0.6) {
+        if (Math.sin(worldX * 0.1 + state.time * 0.08) > 0.6) {
             ctx.fillRect(x, WATER_Y + 3, 4, 1);
         }
+    }
+
+    // light rays
+    ctx.save();
+    for (let i = 0; i < 6; i++) {
+        const rx = (i * 90 + state.time * 0.2) % (W + 100) - 50;
+        const grad2 = ctx.createLinearGradient(rx, WATER_Y, rx + 15, SEA_FLOOR_Y);
+        grad2.addColorStop(0, 'rgba(100,200,255,0.08)');
+        grad2.addColorStop(1, 'rgba(100,200,255,0)');
+        ctx.fillStyle = grad2;
+        ctx.beginPath();
+        ctx.moveTo(rx, WATER_Y);
+        ctx.lineTo(rx + 8, WATER_Y);
+        ctx.lineTo(rx + 25, SEA_FLOOR_Y);
+        ctx.lineTo(rx + 5, SEA_FLOOR_Y);
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+function drawBubbles() {
+    for (let b of state.bubbles) {
+        const sx = b.x - state.camX;
+        if (sx < -5 || sx > W + 5) continue;
+        ctx.strokeStyle = 'rgba(150, 220, 255, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(sx, b.y, b.r, 0, Math.PI * 2);
+        ctx.stroke();
+        // tiny highlight
+        ctx.fillStyle = 'rgba(200, 240, 255, 0.3)';
+        ctx.fillRect(sx - b.r * 0.3, b.y - b.r * 0.5, 1, 1);
     }
 }
 
@@ -232,7 +301,7 @@ function drawSeaweed() {
         let by = SEA_FLOOR_Y;
         ctx.moveTo(bx, by);
         for (let s = 0; s < w.segments; s++) {
-            const sway = Math.sin(state.time * 0.03 + w.phase + s * 0.8) * 4;
+            const sway = Math.sin(state.time * 0.03 + w.phase + s * 0.8) * 3;
             by -= w.segH;
             bx += sway;
             ctx.lineTo(bx, by);
@@ -265,70 +334,99 @@ function drawBoat() {
     const sx = boat.x - state.camX;
     const sy = boat.y;
     let tilt = 0;
-    if (state.leftBtnDown) tilt = 0.06;
-    if (state.rightBtnDown) tilt = -0.06;
+    if (state.leftBtnDown) tilt = 0.05;
+    if (state.rightBtnDown) tilt = -0.05;
+
     ctx.save();
     ctx.translate(sx, sy);
     ctx.rotate(tilt);
+
+    // hull
     ctx.fillStyle = '#8B4513';
-    ctx.fillRect(-24, -2, 48, 12);
+    ctx.fillRect(-24, -2, 48, 10);
     ctx.fillStyle = '#6B3410';
-    ctx.fillRect(-20, 10, 40, 4);
+    ctx.fillRect(-20, 8, 40, 3);
     ctx.fillStyle = '#A0522D';
-    ctx.fillRect(-22, -4, 44, 4);
+    ctx.fillRect(-22, -4, 44, 3);
+
+    // planks
     ctx.fillStyle = '#7B3F12';
-    ctx.fillRect(-12, 0, 2, 10);
-    ctx.fillRect(4, 0, 2, 10);
-    ctx.fillRect(-20, 2, 2, 8);
-    ctx.fillRect(14, 2, 2, 8);
+    ctx.fillRect(-12, 0, 2, 8);
+    ctx.fillRect(4, 0, 2, 8);
+    ctx.fillRect(-20, 1, 2, 7);
+    ctx.fillRect(14, 1, 2, 7);
+
+    // mast
     ctx.fillStyle = '#5a3a1a';
-    ctx.fillRect(-1, -30, 3, 28);
+    ctx.fillRect(-1, -28, 3, 26);
+
+    // sail
     ctx.fillStyle = '#e8d8c0';
     ctx.beginPath();
-    ctx.moveTo(2, -28);
-    ctx.lineTo(2, -8);
-    ctx.lineTo(16, -8);
+    ctx.moveTo(2, -26);
+    ctx.lineTo(2, -6);
+    ctx.lineTo(16, -6);
     ctx.closePath();
     ctx.fill();
+
+    // sail emblem
     ctx.fillStyle = '#6040a0';
-    ctx.fillRect(5, -20, 6, 6);
+    ctx.fillRect(5, -18, 5, 5);
+
+    // wizard body
     ctx.fillStyle = '#6040a0';
-    ctx.fillRect(-8, -14, 8, 10);
+    ctx.fillRect(-8, -12, 8, 9);
+    // head
     ctx.fillStyle = '#f0c8a0';
-    ctx.fillRect(-7, -18, 6, 5);
+    ctx.fillRect(-7, -16, 6, 5);
+    // wizard hat
     ctx.fillStyle = '#4020a0';
-    ctx.fillRect(-8, -22, 8, 4);
-    ctx.fillRect(-6, -25, 4, 3);
-    ctx.fillRect(-5, -27, 2, 2);
+    ctx.fillRect(-8, -20, 8, 4);
+    ctx.fillRect(-6, -23, 4, 3);
+    ctx.fillRect(-5, -25, 2, 2);
+    // hat tip sparkle
+    if (state.time % 40 < 20) {
+        ctx.fillStyle = '#ffee55';
+        ctx.fillRect(-5, -26, 2, 1);
+    }
+
     ctx.restore();
 }
 
 function drawUIBar() {
+    // background
     ctx.fillStyle = 'rgba(20, 12, 8, 0.85)';
     ctx.fillRect(0, 0, W, UI_H);
     ctx.fillStyle = '#8B6914';
     ctx.fillRect(0, UI_H - 2, W, 2);
-    ctx.font = '8px monospace';
+
+    ctx.font = '7px monospace';
     ctx.textBaseline = 'middle';
     const midY = UI_H / 2;
-    const hpBarX = 4;
-    const hpBarW = 50;
-    const hpBarH = 8;
+
+    // HP bar
+    const hpX = 6;
+    const hpW = 60;
+    const hpBarH = 7;
     const hpPct = state.hp / state.maxHp;
-    ctx.fillStyle = '#555';
-    ctx.fillRect(hpBarX, midY - hpBarH / 2, hpBarW, hpBarH);
+    ctx.fillStyle = '#333';
+    ctx.fillRect(hpX, midY - hpBarH / 2, hpW, hpBarH);
     ctx.fillStyle = hpPct > 0.5 ? '#44bb44' : hpPct > 0.25 ? '#ccaa22' : '#cc3333';
-    ctx.fillRect(hpBarX + 1, midY - hpBarH / 2 + 1, (hpBarW - 2) * hpPct, hpBarH - 2);
+    ctx.fillRect(hpX + 1, midY - hpBarH / 2 + 1, (hpW - 2) * hpPct, hpBarH - 2);
     ctx.fillStyle = '#fff';
-    ctx.fillText('HP', hpBarX + 2, midY + 1);
-    const fishX = 62;
+    ctx.fillText('HP', hpX + 2, midY + 1);
+
+    // Fish icon and count
+    const fishX = 80;
     ctx.fillStyle = '#66ccff';
-    ctx.fillRect(fishX, midY - 3, 6, 4);
-    ctx.fillRect(fishX + 6, midY - 2, 2, 2);
-    ctx.fillRect(fishX - 2, midY - 2, 2, 2);
+    ctx.fillRect(fishX, midY - 2, 5, 3);
+    ctx.fillRect(fishX + 5, midY - 1, 2, 1);
+    ctx.fillRect(fishX - 2, midY - 1, 2, 1);
     ctx.fillStyle = '#fff';
-    ctx.fillText(state.fish + '/' + state.fishCap, fishX + 12, midY + 1);
-    const scX = 120;
+    ctx.fillText(state.fish + '/' + state.fishCap, fishX + 10, midY + 1);
+
+    // Scales
+    const scX = 140;
     ctx.fillStyle = '#ffd700';
     ctx.beginPath();
     ctx.moveTo(scX + 3, midY - 4);
@@ -339,16 +437,27 @@ function drawUIBar() {
     ctx.fill();
     ctx.fillStyle = '#ffd700';
     ctx.fillText(state.scales, scX + 10, midY + 1);
-    const menuX = W - 20;
+
+    // Game title (center)
+    ctx.fillStyle = '#c8a84e';
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('FISHING WIZARD', W / 2, midY + 1);
+    ctx.textAlign = 'left';
+
+    // Menu icon
+    const menuX = W - 22;
     ctx.fillStyle = '#ccc';
-    ctx.fillRect(menuX, midY - 5, 14, 2);
-    ctx.fillRect(menuX, midY - 1, 14, 2);
-    ctx.fillRect(menuX, midY + 3, 14, 2);
+    ctx.fillRect(menuX, midY - 4, 14, 2);
+    ctx.fillRect(menuX, midY, 14, 2);
+    ctx.fillRect(menuX, midY + 4, 14, 2);
 }
 
 function drawArrowButtons() {
     const lb = getLeftBtnRect();
     const rb = getRightBtnRect();
+
+    // Left
     ctx.fillStyle = state.leftBtnDown ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)';
     ctx.fillRect(lb.x, lb.y, lb.w, lb.h);
     ctx.strokeStyle = 'rgba(255,255,255,0.3)';
@@ -356,32 +465,53 @@ function drawArrowButtons() {
     ctx.strokeRect(lb.x, lb.y, lb.w, lb.h);
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.beginPath();
-    ctx.moveTo(lb.x + 12, lb.y + lb.h / 2);
-    ctx.lineTo(lb.x + 30, lb.y + 10);
-    ctx.lineTo(lb.x + 30, lb.y + lb.h - 10);
+    ctx.moveTo(lb.x + 10, lb.y + lb.h / 2);
+    ctx.lineTo(lb.x + 26, lb.y + 8);
+    ctx.lineTo(lb.x + 26, lb.y + lb.h - 8);
     ctx.closePath();
     ctx.fill();
+
+    // Right
     ctx.fillStyle = state.rightBtnDown ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)';
     ctx.fillRect(rb.x, rb.y, rb.w, rb.h);
     ctx.strokeStyle = 'rgba(255,255,255,0.3)';
     ctx.strokeRect(rb.x, rb.y, rb.w, rb.h);
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.beginPath();
-    ctx.moveTo(rb.x + rb.w - 12, rb.y + rb.h / 2);
-    ctx.lineTo(rb.x + 14, rb.y + 10);
-    ctx.lineTo(rb.x + 14, rb.y + rb.h - 10);
+    ctx.moveTo(rb.x + rb.w - 10, rb.y + rb.h / 2);
+    ctx.lineTo(rb.x + 10, rb.y + 8);
+    ctx.lineTo(rb.x + 10, rb.y + rb.h - 8);
     ctx.closePath();
     ctx.fill();
 }
 
+// =====================  DEPTH INDICATOR  ===============
+function drawDepthMarkers() {
+    ctx.font = '6px monospace';
+    ctx.fillStyle = 'rgba(150,200,255,0.3)';
+    const zones = [
+        { y: WATER_Y + 15, label: '~ Shallows ~' },
+        { y: WATER_Y + 50, label: '~ Mid Waters ~' },
+        { y: SEA_FLOOR_Y - 30, label: '~ Deep ~' }
+    ];
+    for (let z of zones) {
+        ctx.textAlign = 'right';
+        ctx.fillText(z.label, W - 6, z.y);
+    }
+    ctx.textAlign = 'left';
+}
+
+// =====================  MAIN LOOP  =====================
 function gameLoop() {
     update();
     ctx.clearRect(0, 0, W, H);
     drawSky();
     drawClouds();
     drawWater();
+    drawBubbles();
     drawSeaweed();
     drawSandFloor();
+    drawDepthMarkers();
     drawBoat();
     drawUIBar();
     drawArrowButtons();
