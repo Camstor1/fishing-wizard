@@ -2,1053 +2,1917 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Fishing Wizard</title>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;overflow:hidden;background:#000;
-touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;
-user-select:none;position:fixed;top:0;left:0}
-canvas{display:block;width:100vw;height:100vh;
-image-rendering:pixelated;image-rendering:crisp-edges}
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    touch-action: none;
+  }
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
 </style>
 </head>
 <body>
-<canvas id="game"></canvas>
+<canvas id="gameCanvas"></canvas>
 <script>
-// =====================================================
-//  FISHING WIZARD — Phase 1.2
-//  Boat · Sea · Fish · Spell Casting · Collection
-// =====================================================
+// ============================================================
+// FISHING WIZARD — Phase 1.3
+// Resolution: 640x360 (16:9 landscape, scales to fill screen)
+// ============================================================
 
-const canvas = document.getElementById('game');
+const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-const W = 480;
-const H = 270;
-canvas.width = W;
-canvas.height = H;
-ctx.imageSmoothingEnabled = false;
-
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-function dist(x1, y1, x2, y2) { return Math.sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1)); }
-function rnd(a, b) { return a + Math.random() * (b - a); }
-
-function canvasPos(cx, cy) {
-    const r = canvas.getBoundingClientRect();
-    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+// --- Scaling ---
+const GAME_W = 640, GAME_H = 360;
+let scale = 1, offsetX = 0, offsetY = 0;
+function resize() {
+  const ws = window.innerWidth / GAME_W;
+  const hs = window.innerHeight / GAME_H;
+  scale = Math.min(ws, hs);
+  canvas.width = GAME_W;
+  canvas.height = GAME_H;
+  canvas.style.width = (GAME_W * scale) + 'px';
+  canvas.style.height = (GAME_H * scale) + 'px';
+  offsetX = (window.innerWidth - GAME_W * scale) / 2;
+  offsetY = (window.innerHeight - GAME_H * scale) / 2;
+  canvas.style.marginLeft = offsetX + 'px';
+  canvas.style.marginTop = offsetY + 'px';
 }
+window.addEventListener('resize', resize);
+resize();
 
-// =====================  CONSTANTS  =====================
-const UI_H = 24;
-const WATER_Y = 100;
-const WORLD_W = 2400;
-const SEA_FLOOR_Y = H - 24;
-const BTN_SIZE = 36;
-const BTN_PAD = 10;
+function toGameX(cx) { return (cx - offsetX) / scale; }
+function toGameY(cy) { return (cy - offsetY) / scale; }
 
-// =====================  FISH DEFINITIONS  ==============
+// ============================================================
+// WORLD CONFIG
+// ============================================================
+const WORLD_W = 2800;
+const WATER_Y = 110; // water surface y
+const FLOOR_Y = 330;
+const SHORE_X = 200;  // shore / dock x
+
+// ============================================================
+// FISH TYPES
+// ============================================================
 const FISH_TYPES = [
-    {
-        name: 'Minnow', color: '#88cc88', color2: '#66aa66',
-        w: 8, h: 4, hp: 2, speed: 0.4, value: 1,
-        minDepth: WATER_Y + 10, maxDepth: WATER_Y + 50, zone: 'shallows'
-    },
-    {
-        name: 'Sardine', color: '#99bbdd', color2: '#7799bb',
-        w: 10, h: 4, hp: 3, speed: 0.5, value: 2,
-        minDepth: WATER_Y + 10, maxDepth: WATER_Y + 60, zone: 'shallows'
-    },
-    {
-        name: 'Perch', color: '#ddaa44', color2: '#bb8822',
-        w: 12, h: 6, hp: 5, speed: 0.35, value: 3,
-        minDepth: WATER_Y + 20, maxDepth: WATER_Y + 70, zone: 'shallows'
-    },
-    {
-        name: 'Bass', color: '#55aa55', color2: '#338833',
-        w: 14, h: 7, hp: 8, speed: 0.3, value: 5,
-        minDepth: WATER_Y + 30, maxDepth: WATER_Y + 90, zone: 'mid'
-    },
-    {
-        name: 'Catfish', color: '#887766', color2: '#665544',
-        w: 15, h: 7, hp: 12, speed: 0.25, value: 7,
-        minDepth: WATER_Y + 50, maxDepth: WATER_Y + 100, zone: 'mid'
-    },
-    {
-        name: 'Red Snapper', color: '#dd4444', color2: '#aa2222',
-        w: 13, h: 7, hp: 10, speed: 0.45, value: 8,
-        minDepth: WATER_Y + 40, maxDepth: WATER_Y + 90, zone: 'mid'
-    },
-    {
-        name: 'Tuna', color: '#4466aa', color2: '#224488',
-        w: 18, h: 8, hp: 18, speed: 0.55, value: 12,
-        minDepth: WATER_Y + 60, maxDepth: SEA_FLOOR_Y - 20, zone: 'deep'
-    },
-    {
-        name: 'Swordfish', color: '#7788bb', color2: '#556699',
-        w: 22, h: 7, hp: 25, speed: 0.6, value: 18,
-        minDepth: WATER_Y + 70, maxDepth: SEA_FLOOR_Y - 10, zone: 'deep'
-    },
-    {
-        name: 'Anglerfish', color: '#553344', color2: '#331122',
-        w: 14, h: 10, hp: 20, speed: 0.2, value: 15,
-        minDepth: SEA_FLOOR_Y - 50, maxDepth: SEA_FLOOR_Y - 5, zone: 'deep'
-    },
-    {
-        name: 'Pufferfish', color: '#ddcc55', color2: '#bbaa33',
-        w: 10, h: 10, hp: 15, speed: 0.15, value: 10,
-        minDepth: WATER_Y + 30, maxDepth: WATER_Y + 80, zone: 'mid'
-    }
+  { name:'Minnow',     color:'#a8d8ea', size:8,  hp:1,  speed:0.6, minDepth:0,   maxDepth:60,  scales:2,  zone:0 },
+  { name:'Sardine',    color:'#c7e8fa', size:10, hp:2,  speed:0.8, minDepth:0,   maxDepth:80,  scales:3,  zone:0 },
+  { name:'Perch',      color:'#f4a261', size:13, hp:4,  speed:0.5, minDepth:20,  maxDepth:120, scales:6,  zone:0 },
+  { name:'Bass',       color:'#2a9d8f', size:15, hp:7,  speed:0.6, minDepth:30,  maxDepth:150, scales:10, zone:1 },
+  { name:'Catfish',    color:'#6d6875', size:18, hp:10, speed:0.4, minDepth:60,  maxDepth:180, scales:15, zone:1 },
+  { name:'Snapper',    color:'#e76f51', size:14, hp:8,  speed:0.9, minDepth:50,  maxDepth:160, scales:18, zone:1 },
+  { name:'Tuna',       color:'#457b9d', size:22, hp:18, speed:1.1, minDepth:80,  maxDepth:200, scales:28, zone:2 },
+  { name:'Swordfish',  color:'#1d3557', size:26, hp:25, speed:1.3, minDepth:100, maxDepth:220, scales:40, zone:2 },
+  { name:'Anglerfish', color:'#4a0e8f', size:20, hp:30, speed:0.7, minDepth:140, maxDepth:240, scales:55, zone:2 },
+  { name:'Pufferfish', color:'#e9c46a', size:16, hp:12, speed:0.3, minDepth:40,  maxDepth:180, scales:20, zone:1 },
 ];
 
-// =====================  SPELL DEFINITIONS  =============
-const SPELLS = {
-    fireball: {
-        name: 'Fireball',
-        color: '#ff6622',
-        glow: '#ff4400',
-        trail: '#ffaa00',
-        radius: 6,
-        damage: 3,
-        speed: 2.5,
-        duration: 180,
-        depthPenalty: 0.012
-    }
-};
+// ============================================================
+// UPGRADES CATALOG
+// ============================================================
+const UPGRADES = [
+  { id:'boat_speed_1',   name:'Faster Oars',     desc:'Boat speed +30%',   cost:40,  category:'boat',   maxLevel:1 },
+  { id:'boat_speed_2',   name:'Wind Sails',      desc:'Boat speed +50%',   cost:120, category:'boat',   maxLevel:1, requires:'boat_speed_1' },
+  { id:'inventory_1',    name:'Bigger Basket',   desc:'Carry 5 more fish', cost:50,  category:'boat',   maxLevel:1 },
+  { id:'inventory_2',    name:'Magic Satchel',   desc:'Carry 10 more fish',cost:150, category:'boat',   maxLevel:1, requires:'inventory_1' },
+  { id:'spell_power_1',  name:'Focused Flame',   desc:'Fireball dmg +25%', cost:60,  category:'spells', maxLevel:1 },
+  { id:'spell_power_2',  name:'Arcane Surge',    desc:'Fireball dmg +50%', cost:180, category:'spells', maxLevel:1, requires:'spell_power_1' },
+  { id:'spell_depth_1',  name:'Deep Cast',       desc:'Spell range deeper',cost:80,  category:'spells', maxLevel:1 },
+  { id:'hat_pointy',     name:'Pointy Hat',      desc:'+5% Scales earned', cost:70,  category:'outfits',maxLevel:1 },
+  { id:'hat_captain',    name:"Captain's Hat",   desc:'+10% boat speed',   cost:130, category:'outfits',maxLevel:1 },
+  { id:'robe_fancy',     name:'Fancy Robes',     desc:'+10% fish value',   cost:200, category:'outfits',maxLevel:1 },
+];
 
-// =====================  GAME STATE  ====================
+// ============================================================
+// GAME STATE
+// ============================================================
 const state = {
-    time: 0,
-    camX: 0,
-    hp: 100,
-    maxHp: 100,
-    fish: 0,
-    fishCap: 10,
-    scales: 0,
-    currentSpell: 'fireball',
+  camera: 0,          // world scroll x
+  scales: 20,
+  inventory: [],      // { type, count } array
+  maxInventory: 10,
+  hp: 5, maxHp: 5,
+  ownedUpgrades: [],
+  // supply/demand tracking per fish
+  salesHistory: {},   // fishName -> [timestamps]
 
-    boat: {
-        x: 300,
-        y: WATER_Y - 10,
-        w: 48,
-        h: 20,
-        speed: 1.6,
-        bobOffset: 0
-    },
+  // Shop panel — full-screen slide-up
+  shopOpen: false,
+  shopSlide: 0,       // 0 = fully hidden, 1 = fully shown (animated)
+  shopTab: 'sell',    // 'sell' | 'upgrades'
+  shopScrollY: 0,     // scroll offset for upgrade list
+  shopScrollDrag: null, // { startY, startScrollY }
 
-    fishes: [],
-    spells: [],
-    floatingFish: [],
-    particles: [],
-    damageNumbers: [],
+  // Boat
+  boat: { x: 400, y: WATER_Y - 12, vx: 0, tilt: 0, bobTimer: 0 },
+  boatSpeed: 1.4,
 
-    clouds: [],
-    weeds: [],
-    sandDetails: [],
-    bubbles: [],
+  // Spell
+  activeFirball: null,
+  castStart: null,
+  particles: [],
+  damageNumbers: [],
 
-    // touch
-    leftBtnDown: false,
-    rightBtnDown: false,
-    leftTouchId: null,
-    rightTouchId: null,
-    spellTouchId: null,
-    spellDragPos: null
+  // Fish
+  fish: [],
+
+  // Clouds & env
+  clouds: [],
+  bubbles: [],
+
+  // Touch
+  leftTouchId: null,
+  rightTouchId: null,
+  castTouchId: null,
+  castTouchPos: null,
+
+  // Keyboard
+  keys: {},
+
+  // Fishmonger dialogue
+  dialogue: null,
+  dialogueTimer: 0,
+
+  // UI
+  lastSaleTime: 0,
+  notification: null,
+  notifTimer: 0,
+
+  // Seaweed positions
+  seaweeds: [],
+  lightRays: [],
 };
 
-// =====================  WORLD INIT  ====================
-function initWorld() {
-    for (let i = 0; i < 15; i++) {
-        state.clouds.push({
-            x: Math.random() * WORLD_W,
-            y: UI_H + 4 + Math.random() * 35,
-            w: 20 + Math.random() * 44,
-            h: 6 + Math.random() * 10,
-            speed: 0.04 + Math.random() * 0.1,
-            parallax: 0.15 + Math.random() * 0.3
-        });
-    }
-    for (let i = 0; i < 50; i++) {
-        state.weeds.push({
-            x: 30 + Math.random() * (WORLD_W - 60),
-            segments: 3 + Math.floor(Math.random() * 4),
-            segH: 5 + Math.random() * 10,
-            color: Math.random() > 0.5 ? '#2d7a1e' : '#1e6215',
-            phase: Math.random() * Math.PI * 2
-        });
-    }
-    for (let i = 0; i < 60; i++) {
-        state.sandDetails.push({
-            x: Math.random() * WORLD_W,
-            y: SEA_FLOOR_Y + 3 + Math.random() * 14,
-            r: 1 + Math.random() * 2,
-            color: Math.random() > 0.5 ? '#c8a84e' : '#a08838'
-        });
-    }
-    for (let i = 0; i < 20; i++) {
-        state.bubbles.push({
-            x: Math.random() * WORLD_W,
-            y: WATER_Y + 20 + Math.random() * (SEA_FLOOR_Y - WATER_Y - 40),
-            r: 1 + Math.random() * 2,
-            speed: 0.15 + Math.random() * 0.3,
-            wobble: Math.random() * Math.PI * 2
-        });
-    }
-
-    // spawn initial fish
-    spawnFish(30);
+// Init env
+for (let i = 0; i < 20; i++) {
+  state.clouds.push({
+    x: Math.random() * WORLD_W,
+    y: 15 + Math.random() * 40,
+    speed: 0.1 + Math.random() * 0.15,
+    w: 50 + Math.random() * 90,
+    h: 18 + Math.random() * 20,
+    alpha: 0.6 + Math.random() * 0.3
+  });
+}
+for (let i = 0; i < 60; i++) {
+  state.bubbles.push({
+    x: SHORE_X + 50 + Math.random() * (WORLD_W - SHORE_X - 100),
+    y: WATER_Y + 30 + Math.random() * (FLOOR_Y - WATER_Y - 40),
+    r: 1 + Math.random() * 2,
+    speed: 0.3 + Math.random() * 0.5,
+    wobble: Math.random() * Math.PI * 2,
+  });
+}
+for (let i = 0; i < 25; i++) {
+  state.seaweeds.push({
+    x: SHORE_X + 100 + Math.random() * (WORLD_W - SHORE_X - 200),
+    h: 15 + Math.random() * 35,
+    phase: Math.random() * Math.PI * 2,
+    segments: 4 + Math.floor(Math.random() * 4),
+  });
+}
+for (let i = 0; i < 8; i++) {
+  state.lightRays.push({
+    x: SHORE_X + 200 + Math.random() * (WORLD_W - SHORE_X - 400),
+    angle: -0.15 + Math.random() * 0.3,
+    width: 15 + Math.random() * 30,
+    alpha: 0.03 + Math.random() * 0.04,
+  });
 }
 
-function spawnFish(count) {
-    for (let i = 0; i < count; i++) {
-        const type = FISH_TYPES[Math.floor(Math.random() * FISH_TYPES.length)];
-        const f = {
-            type: type,
-            x: rnd(50, WORLD_W - 50),
-            y: rnd(type.minDepth, type.maxDepth),
-            hp: type.hp,
-            maxHp: type.hp,
-            dir: Math.random() > 0.5 ? 1 : -1,
-            speed: type.speed * rnd(0.8, 1.2),
-            alive: true,
-            hitFlash: 0,
-            turnTimer: Math.floor(rnd(60, 300)),
-            vertSpeed: rnd(-0.1, 0.1)
-        };
-        state.fishes.push(f);
-    }
-}
-
-initWorld();
-
-// =====================  BUTTON RECTS  ==================
-function getLeftBtnRect() {
-    return { x: BTN_PAD, y: H - BTN_SIZE - BTN_PAD, w: BTN_SIZE, h: BTN_SIZE };
-}
-function getRightBtnRect() {
-    return { x: BTN_PAD + BTN_SIZE + 8, y: H - BTN_SIZE - BTN_PAD, w: BTN_SIZE, h: BTN_SIZE };
-}
-function getSpellBtnRect() {
-    return { x: W - BTN_SIZE - BTN_PAD, y: H - BTN_SIZE - BTN_PAD, w: BTN_SIZE, h: BTN_SIZE };
-}
-
-function ptInRect(px, py, rect) {
-    return px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
-}
-
-function isButtonArea(p) {
-    return ptInRect(p.x, p.y, getLeftBtnRect()) ||
-           ptInRect(p.x, p.y, getRightBtnRect()) ||
-           ptInRect(p.x, p.y, getSpellBtnRect());
-}
-
-// =====================  SPELL CASTING  =================
-function castSpell(screenX, screenY) {
-    if (state.fish >= state.fishCap) return;
-
-    const def = SPELLS[state.currentSpell];
-    const worldX = screenX + state.camX;
-
-    if (screenY < WATER_Y) return;
-
-    state.spells.push({
-        def: def,
-        x: worldX,
-        y: WATER_Y + 4,
-        targetX: worldX,
-        targetY: screenY,
-        age: 0,
-        alive: true,
-        trail: []
+function spawnFish() {
+  const available = WORLD_W - SHORE_X - 100;
+  for (let i = 0; i < 20; i++) {
+    const type = FISH_TYPES[Math.floor(Math.random() * FISH_TYPES.length)];
+    const depth = type.minDepth + Math.random() * (type.maxDepth - type.minDepth);
+    state.fish.push({
+      type,
+      x: SHORE_X + 80 + Math.random() * available,
+      y: WATER_Y + depth,
+      vx: (Math.random() > 0.5 ? 1 : -1) * type.speed,
+      hp: type.hp,
+      maxHp: type.hp,
+      stunTimer: 0,
+      floating: false,
+      floatY: 0,
+      floatTimer: 0,
+      flashTimer: 0,
+      collected: false,
+      collectAnim: 0,
     });
+  }
+}
+spawnFish();
+
+// ============================================================
+// HELPERS
+// ============================================================
+function notify(msg, color='#ffd700') {
+  state.notification = { msg, color };
+  state.notifTimer = 120;
 }
 
-// =====================  TOUCH HANDLING  ================
-canvas.addEventListener('touchstart', function(e) {
-    e.preventDefault();
-    const lb = getLeftBtnRect();
-    const rb = getRightBtnRect();
-    const sb = getSpellBtnRect();
-
-    for (let t of e.changedTouches) {
-        const p = canvasPos(t.clientX, t.clientY);
-
-        if (ptInRect(p.x, p.y, lb)) {
-            state.leftBtnDown = true;
-            state.leftTouchId = t.identifier;
-        } else if (ptInRect(p.x, p.y, rb)) {
-            state.rightBtnDown = true;
-            state.rightTouchId = t.identifier;
-        } else if (p.y > WATER_Y && p.y < H - BTN_SIZE - BTN_PAD - 5 && !isButtonArea(p)) {
-            // cast spell and start drag
-            castSpell(p.x, p.y);
-            state.spellTouchId = t.identifier;
-            state.spellDragPos = { x: p.x, y: p.y };
-        } else if (p.y > WATER_Y) {
-            // check for tapping floating fish
-            checkFloatingFishTap(p.x, p.y);
-        }
-    }
-}, { passive: false });
-
-canvas.addEventListener('touchmove', function(e) {
-    e.preventDefault();
-    for (let t of e.changedTouches) {
-        if (t.identifier === state.spellTouchId) {
-            const p = canvasPos(t.clientX, t.clientY);
-            state.spellDragPos = { x: p.x, y: p.y };
-        }
-    }
-}, { passive: false });
-
-canvas.addEventListener('touchend', function(e) {
-    e.preventDefault();
-    for (let t of e.changedTouches) {
-        if (t.identifier === state.leftTouchId) {
-            state.leftBtnDown = false;
-            state.leftTouchId = null;
-        }
-        if (t.identifier === state.rightTouchId) {
-            state.rightBtnDown = false;
-            state.rightTouchId = null;
-        }
-        if (t.identifier === state.spellTouchId) {
-            state.spellTouchId = null;
-            state.spellDragPos = null;
-        }
-    }
-}, { passive: false });
-
-canvas.addEventListener('touchcancel', function(e) {
-    state.leftBtnDown = false;
-    state.rightBtnDown = false;
-    state.leftTouchId = null;
-    state.rightTouchId = null;
-    state.spellTouchId = null;
-    state.spellDragPos = null;
-}, { passive: false });
-
-// --- Mouse fallback for desktop ---
-let mouseSpellActive = false;
-canvas.addEventListener('mousedown', function(e) {
-    const p = canvasPos(e.clientX, e.clientY);
-    if (isButtonArea(p)) return;
-
-    // check floating fish first
-    if (checkFloatingFishTap(p.x, p.y)) return;
-
-    if (p.y > WATER_Y) {
-        castSpell(p.x, p.y);
-        mouseSpellActive = true;
-        state.spellDragPos = { x: p.x, y: p.y };
-    }
-});
-canvas.addEventListener('mousemove', function(e) {
-    if (mouseSpellActive) {
-        const p = canvasPos(e.clientX, e.clientY);
-        state.spellDragPos = { x: p.x, y: p.y };
-    }
-});
-canvas.addEventListener('mouseup', function(e) {
-    mouseSpellActive = false;
-    state.spellDragPos = null;
-});
-
-// --- Keyboard ---
-window.addEventListener('keydown', function(e) {
-    if (e.key === 'ArrowLeft' || e.key === 'a') state.leftBtnDown = true;
-    if (e.key === 'ArrowRight' || e.key === 'd') state.rightBtnDown = true;
-});
-window.addEventListener('keyup', function(e) {
-    if (e.key === 'ArrowLeft' || e.key === 'a') state.leftBtnDown = false;
-    if (e.key === 'ArrowRight' || e.key === 'd') state.rightBtnDown = false;
-});
-
-// =====================  FLOATING FISH TAP  =============
-function checkFloatingFishTap(screenX, screenY) {
-    for (let i = state.floatingFish.length - 1; i >= 0; i--) {
-        const ff = state.floatingFish[i];
-        const sx = ff.x - state.camX;
-        const sy = ff.y;
-        if (dist(screenX, screenY, sx, sy) < 15) {
-            if (state.fish < state.fishCap) {
-                state.fish++;
-                state.scales += ff.type.value;
-                // collect particles
-                for (let p = 0; p < 6; p++) {
-                    state.particles.push({
-                        x: ff.x, y: ff.y,
-                        vx: rnd(-1.5, 1.5), vy: rnd(-2, -0.5),
-                        life: 30, maxLife: 30,
-                        color: '#ffd700', size: 2
-                    });
-                }
-                state.floatingFish.splice(i, 1);
-                return true;
-            }
-        }
-    }
-    return false;
+function getEffectiveBoatSpeed() {
+  let s = state.boatSpeed;
+  if (state.ownedUpgrades.includes('boat_speed_1')) s *= 1.3;
+  if (state.ownedUpgrades.includes('boat_speed_2')) s *= 1.5;
+  if (state.ownedUpgrades.includes('hat_captain')) s *= 1.1;
+  return s;
 }
 
-// =====================  PARTICLES  =====================
-function spawnHitParticles(x, y, color) {
-    for (let i = 0; i < 4; i++) {
-        state.particles.push({
-            x: x, y: y,
-            vx: rnd(-1, 1), vy: rnd(-1, 1),
-            life: 20, maxLife: 20,
-            color: color, size: 2
-        });
-    }
+function getEffectiveInventoryCap() {
+  let c = state.maxInventory;
+  if (state.ownedUpgrades.includes('inventory_1')) c += 5;
+  if (state.ownedUpgrades.includes('inventory_2')) c += 10;
+  return c;
 }
 
-function spawnDamageNumber(x, y, dmg) {
-    state.damageNumbers.push({
-        x: x, y: y,
-        text: '-' + dmg,
-        life: 40, maxLife: 40
+function getEffectiveSpellDamage() {
+  let d = 1;
+  if (state.ownedUpgrades.includes('spell_power_1')) d *= 1.25;
+  if (state.ownedUpgrades.includes('spell_power_2')) d *= 1.5;
+  return d;
+}
+
+function getEffectiveSpellDepth() {
+  let d = 200;
+  if (state.ownedUpgrades.includes('spell_depth_1')) d = 280;
+  return d;
+}
+
+function fishScaleValue(fish) {
+  let v = fish.type.scales;
+  if (state.ownedUpgrades.includes('hat_pointy')) v = Math.ceil(v * 1.05);
+  if (state.ownedUpgrades.includes('robe_fancy')) v = Math.ceil(v * 1.1);
+  // Supply/demand penalty
+  const hist = state.salesHistory[fish.type.name] || [];
+  const now = Date.now();
+  const recent = hist.filter(t => now - t < 120000).length;
+  const penalty = Math.max(0.5, 1 - recent * 0.08);
+  return Math.max(1, Math.round(v * penalty));
+}
+
+function totalInventoryCount() {
+  return state.inventory.reduce((s, e) => s + e.count, 0);
+}
+
+function addToInventory(fishType) {
+  const cap = getEffectiveInventoryCap();
+  if (totalInventoryCount() >= cap) return false;
+  const existing = state.inventory.find(e => e.type.name === fishType.name);
+  if (existing) existing.count++;
+  else state.inventory.push({ type: fishType, count: 1 });
+  return true;
+}
+
+function upgradeUnlocked(upg) {
+  if (!upg.requires) return true;
+  return state.ownedUpgrades.includes(upg.requires);
+}
+
+function purchaseUpgrade(upg) {
+  if (state.ownedUpgrades.includes(upg.id)) return;
+  if (!upgradeUnlocked(upg)) { notify("Need prerequisite first!", '#ff6b6b'); return; }
+  if (state.scales < upg.cost) { notify("Not enough Scales!", '#ff6b6b'); return; }
+  state.scales -= upg.cost;
+  state.ownedUpgrades.push(upg.id);
+  notify(`Bought: ${upg.name}!`, '#7fff7f');
+}
+
+function sellAll() {
+  if (state.inventory.length === 0) { notify("No fish to sell!", '#ff6b6b'); return; }
+  let earned = 0;
+  const now = Date.now();
+  for (const entry of state.inventory) {
+    const perFish = fishScaleValue({ type: entry.type });
+    earned += perFish * entry.count;
+    if (!state.salesHistory[entry.type.name]) state.salesHistory[entry.type.name] = [];
+    for (let i = 0; i < entry.count; i++) state.salesHistory[entry.type.name].push(now);
+  }
+  state.inventory = [];
+  state.scales += earned;
+  state.lastSaleTime = now;
+  notify(`Sold for ${earned} Scales! 🐟`, '#ffd700');
+  showDialogue(FISHMONGER_LINES[Math.floor(Math.random() * FISHMONGER_LINES.length)]);
+}
+
+function sellOne(entry) {
+  const val = fishScaleValue({ type: entry.type });
+  state.scales += val;
+  const now = Date.now();
+  if (!state.salesHistory[entry.type.name]) state.salesHistory[entry.type.name] = [];
+  state.salesHistory[entry.type.name].push(now);
+  entry.count--;
+  if (entry.count <= 0) state.inventory = state.inventory.filter(e => e.count > 0);
+  notify(`+${val} Scales`, '#ffd700');
+}
+
+const FISHMONGER_LINES = [
+  "Fin-tastic haul, wizard!",
+  "You're quite the reel deal!",
+  "I'm hooked on your catches!",
+  "Scale-cellent work today!",
+  "You've got a knack for this, net-wise.",
+  "Don't flounder now — keep fishin'!",
+  "Shore thing! Come back anytime.",
+  "That's some gill-ty pleasure right there.",
+];
+
+function showDialogue(line) {
+  state.dialogue = line;
+  state.dialogueTimer = 180;
+}
+
+// ============================================================
+// SPAWN / RESPAWN
+// ============================================================
+function checkRespawn() {
+  const alive = state.fish.filter(f => !f.collected).length;
+  if (alive < 15) {
+    for (let i = 0; i < 8; i++) {
+      const type = FISH_TYPES[Math.floor(Math.random() * FISH_TYPES.length)];
+      const depth = type.minDepth + Math.random() * (type.maxDepth - type.minDepth);
+      state.fish.push({
+        type,
+        x: SHORE_X + 150 + Math.random() * (WORLD_W - SHORE_X - 200),
+        y: WATER_Y + depth,
+        vx: (Math.random() > 0.5 ? 1 : -1) * type.speed,
+        hp: type.hp,
+        maxHp: type.hp,
+        stunTimer: 0,
+        floating: false,
+        floatY: 0,
+        floatTimer: 0,
+        flashTimer: 0,
+        collected: false,
+        collectAnim: 0,
+      });
+    }
+  }
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+
+// BUTTONS (screen coords in game space)
+function getButtons() {
+  return {
+    left:  { x:12,  y:GAME_H-50, w:44, h:38 },
+    right: { x:62,  y:GAME_H-50, w:44, h:38 },
+    cast:  { x:GAME_W-70, y:GAME_H-60, w:58, h:50 },
+    shop:  { x:GAME_W-50, y:4, w:44, h:22 },
+  };
+}
+
+function inBtn(btn, gx, gy) {
+  return gx >= btn.x && gx <= btn.x+btn.w && gy >= btn.y && gy <= btn.y+btn.h;
+}
+
+// Touch
+function handleTouchStart(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const gx = toGameX(t.clientX), gy = toGameY(t.clientY);
+
+    // Shop panel interactions
+    if (state.shopOpen || state.shopSlide > 0.1) {
+      const slideY = GAME_H * (1 - state.shopSlide);
+      if (gy > slideY) {
+        // Start scroll drag tracking
+        state.shopScrollDrag = { id: t.identifier, startY: gy, startScrollY: state.shopScrollY };
+        return;
+      }
+      // Tap above the panel while open = close
+      if (state.shopOpen) { toggleShop(); return; }
+    }
+
+    const btns = getButtons();
+    if (inBtn(btns.left, gx, gy))  { state.leftTouchId  = t.identifier; continue; }
+    if (inBtn(btns.right, gx, gy)) { state.rightTouchId = t.identifier; continue; }
+    if (inBtn(btns.shop, gx, gy))  { toggleShop(); continue; }
+    if (inBtn(btns.cast, gx, gy) || gx > GAME_W/2) {
+      if (!state.activeFirball) {
+        beginCast(gx, gy, t.identifier);
+      } else {
+        state.castTouchId = t.identifier;
+        state.castTouchPos = { x:gx, y:gy };
+      }
+    }
+  }
+}
+function handleTouchMove(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const gx = toGameX(t.clientX), gy = toGameY(t.clientY);
+    if (state.shopScrollDrag && t.identifier === state.shopScrollDrag.id) {
+      const delta = state.shopScrollDrag.startY - gy;
+      const maxScroll = state.shopTab === 'sell'
+        ? Math.max(0, state.inventory.length * 36 - (GAME_H - 120))
+        : Math.max(0, UPGRADES.length * 38 + 3 * 32 - (GAME_H - 120));
+      state.shopScrollY = Math.max(0, Math.min(maxScroll, state.shopScrollDrag.startScrollY + delta));
+    }
+    if (t.identifier === state.castTouchId) {
+      state.castTouchPos = { x:gx, y:gy };
+    }
+  }
+}
+function handleTouchEnd(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (state.shopScrollDrag && t.identifier === state.shopScrollDrag.id) {
+      // If barely moved = it was a tap, not a scroll
+      const slideY = GAME_H * (1 - state.shopSlide);
+      const gx = toGameX(t.clientX), gy = toGameY(t.clientY);
+      const moved = Math.abs(gy - state.shopScrollDrag.startY);
+      if (moved < 6) handleShopTap(gx, gy, t.identifier);
+      state.shopScrollDrag = null;
+    }
+    if (t.identifier === state.leftTouchId)  state.leftTouchId  = null;
+    if (t.identifier === state.rightTouchId) state.rightTouchId = null;
+    if (t.identifier === state.castTouchId) {
+      state.castTouchId = null;
+      state.castTouchPos = null;
+    }
+  }
+}
+canvas.addEventListener('touchstart', handleTouchStart, { passive:false });
+canvas.addEventListener('touchmove', handleTouchMove, { passive:false });
+canvas.addEventListener('touchend', handleTouchEnd, { passive:false });
+canvas.addEventListener('touchcancel', handleTouchEnd, { passive:false });
+
+// Mouse (desktop)
+let mouseDown = false, mouseTouchId = 99;
+let mouseShopDrag = null;
+canvas.addEventListener('mousedown', e => {
+  const gx = toGameX(e.clientX), gy = toGameY(e.clientY);
+  if (state.shopOpen || state.shopSlide > 0.1) {
+    const slideY = GAME_H * (1 - state.shopSlide);
+    if (gy > slideY) {
+      mouseShopDrag = { startY: gy, startScrollY: state.shopScrollY };
+      return;
+    }
+    if (state.shopOpen) { toggleShop(); return; }
+  }
+  const btns = getButtons();
+  if (inBtn(btns.shop, gx, gy)) { toggleShop(); return; }
+  mouseDown = true;
+  if (!state.activeFirball) beginCast(gx, gy, mouseTouchId);
+  else { state.castTouchId = mouseTouchId; state.castTouchPos={x:gx,y:gy}; }
+});
+canvas.addEventListener('mousemove', e => {
+  const gx = toGameX(e.clientX), gy = toGameY(e.clientY);
+  if (mouseShopDrag) {
+    const delta = mouseShopDrag.startY - gy;
+    const maxScroll = state.shopTab === 'sell'
+      ? Math.max(0, state.inventory.length * 36 - (GAME_H - 120))
+      : Math.max(0, UPGRADES.length * 38 + 3 * 32 - (GAME_H - 120));
+    state.shopScrollY = Math.max(0, Math.min(maxScroll, mouseShopDrag.startScrollY + delta));
+  }
+  if (state.castTouchId === mouseTouchId) {
+    state.castTouchPos = { x:gx, y:gy };
+  }
+});
+canvas.addEventListener('mouseup', e => {
+  if (mouseShopDrag) {
+    const gx = toGameX(e.clientX), gy = toGameY(e.clientY);
+    const moved = Math.abs(gy - mouseShopDrag.startY);
+    if (moved < 6) handleShopTap(gx, gy, -1);
+    mouseShopDrag = null;
+    return;
+  }
+  mouseDown = false;
+  if (state.castTouchId === mouseTouchId) { state.castTouchId=null; state.castTouchPos=null; }
+});
+
+// Keyboard
+window.addEventListener('keydown', e => { state.keys[e.key] = true; });
+window.addEventListener('keyup', e => { state.keys[e.key] = false; });
+
+// ============================================================
+// CAST SPELL
+// ============================================================
+function beginCast(gx, gy, tid) {
+  // Only cast into water area
+  if (gy < WATER_Y - 5 || gy > FLOOR_Y) return;
+  const worldX = gx + state.camera;
+  const worldY = gy;
+  state.activeFirball = {
+    x: state.boat.x,
+    y: state.boat.y - 5,
+    targetX: worldX,
+    targetY: worldY,
+    speed: 3.5,
+    life: 1.0,
+  };
+  state.castTouchId = tid;
+  state.castTouchPos = { x:gx, y:gy };
+}
+
+// ============================================================
+// SHOP
+// ============================================================
+function toggleShop() {
+  const nearShore = state.boat.x < SHORE_X + 120;
+  if (!state.shopOpen && !nearShore) {
+    notify("Return to shore to sell!", '#ff9f43');
+    return;
+  }
+  state.shopOpen = !state.shopOpen;
+  state.shopScrollY = 0;
+  if (state.shopOpen) {
+    showDialogue(FISHMONGER_LINES[Math.floor(Math.random() * FISHMONGER_LINES.length)]);
+  }
+}
+
+// Shop panel is full-screen — no fixed layout object needed
+
+function handleShopTap(gx, gy, tid) {
+  const slideY = GAME_H * (1 - state.shopSlide);
+  const panelTop = slideY;          // top of sliding panel
+  const headerH = 48;               // top bar with tabs + close
+  const tabW = (GAME_W) / 2;
+
+  // Close button (top-right X)
+  if (gx > GAME_W - 36 && gy > panelTop + 6 && gy < panelTop + headerH - 6) {
+    toggleShop(); return;
+  }
+
+  // Tab switching
+  if (gy > panelTop + 4 && gy < panelTop + headerH) {
+    if (gx < tabW) { state.shopTab = 'sell'; state.shopScrollY = 0; return; }
+    else            { state.shopTab = 'upgrades'; state.shopScrollY = 0; return; }
+  }
+
+  const contentTop = panelTop + headerH;
+
+  if (state.shopTab === 'sell') {
+    // Sell All button — bottom strip
+    const sellAllY = GAME_H - 32;
+    if (gy > sellAllY && gy < GAME_H - 4) { sellAll(); return; }
+
+    // Individual rows
+    const rowH = 36;
+    state.inventory.forEach((entry, i) => {
+      const ry = contentTop + 4 + i * rowH - state.shopScrollY;
+      if (ry < contentTop - rowH || ry > GAME_H) return;
+      // Sell-one tap zone (right 80px)
+      if (gy > ry + 2 && gy < ry + rowH - 2 && gx > GAME_W - 90) {
+        sellOne(entry);
+      }
     });
+
+  } else {
+    // Upgrades — tap buy buttons
+    let rowY = contentTop + 4 - state.shopScrollY;
+    const catNames = ['boat','spells','outfits'];
+    const catLabels = { boat:'⚓  BOAT', spells:'🔥 SPELLS', outfits:'🧙 OUTFITS' };
+    catNames.forEach(cat => {
+      rowY += 26; // header row
+      const catUpgs = UPGRADES.filter(u => u.category === cat);
+      catUpgs.forEach(upg => {
+        const rowH = 38;
+        // Buy button zone: right 90px, within this row
+        if (gy > rowY + 4 && gy < rowY + rowH - 4 && gx > GAME_W - 96) {
+          purchaseUpgrade(upg);
+        }
+        rowY += rowH;
+      });
+      rowY += 6;
+    });
+  }
 }
 
-// =====================  UPDATE  ========================
-function update() {
-    state.time++;
-    const boat = state.boat;
+// ============================================================
+// UPDATE
+// ============================================================
+let lastTime = 0;
+function update(dt) {
+  const boat = state.boat;
+  const spd = getEffectiveBoatSpeed();
 
-    // Boat movement
-    if (state.leftBtnDown) boat.x -= boat.speed;
-    if (state.rightBtnDown) boat.x += boat.speed;
-    boat.x = clamp(boat.x, boat.w / 2, WORLD_W - boat.w / 2);
-    boat.bobOffset = Math.sin(state.time * 0.04) * 2;
-    boat.y = WATER_Y - 10 + boat.bobOffset;
-    state.camX = clamp(boat.x - W / 2, 0, WORLD_W - W);
+  // --- Boat movement ---
+  if (!state.shopOpen) {
+    let moveX = 0;
+    if (state.leftTouchId !== null || state.keys['ArrowLeft'] || state.keys['a'] || state.keys['A']) moveX -= spd;
+    if (state.rightTouchId !== null || state.keys['ArrowRight'] || state.keys['d'] || state.keys['D']) moveX += spd;
+    boat.vx = moveX;
+    boat.x += boat.vx;
+    boat.x = Math.max(SHORE_X + 20, Math.min(WORLD_W - 60, boat.x));
+    boat.tilt = boat.vx * 0.08;
+  }
 
-    // Clouds
-    for (let c of state.clouds) {
-        c.x += c.speed;
-        if (c.x > WORLD_W + 50) c.x = -c.w - 10;
+  // Bob
+  boat.bobTimer += 0.04;
+  boat.y = WATER_Y - 12 + Math.sin(boat.bobTimer) * 2.5;
+
+  // --- Camera ---
+  const targetCam = boat.x - GAME_W / 2.2;
+  state.camera += (targetCam - state.camera) * 0.08;
+  state.camera = Math.max(0, Math.min(WORLD_W - GAME_W, state.camera));
+
+  // --- Fireball ---
+  if (state.activeFirball) {
+    const fb = state.activeFirball;
+    // Steer toward finger
+    if (state.castTouchPos) {
+      fb.targetX = state.castTouchPos.x + state.camera;
+      fb.targetY = state.castTouchPos.y;
     }
+    const dx = fb.targetX - fb.x, dy = fb.targetY - fb.y;
+    const dist = Math.sqrt(dx*dx+dy*dy);
+    if (dist > 3) {
+      fb.x += (dx/dist) * fb.speed;
+      fb.y += (dy/dist) * fb.speed;
+    }
+    // Depth-based life drain
+    const depth = fb.y - WATER_Y;
+    const maxDepth = getEffectiveSpellDepth();
+    fb.life -= 0.003 + (depth / maxDepth) * 0.004;
 
-    // Bubbles
-    for (let b of state.bubbles) {
-        b.y -= b.speed;
-        b.x += Math.sin(state.time * 0.05 + b.wobble) * 0.3;
-        if (b.y < WATER_Y + 2) {
-            b.y = SEA_FLOOR_Y - 10 - Math.random() * 20;
-            b.x = Math.random() * WORLD_W;
+    // Particles
+    state.particles.push({
+      x: fb.x, y: fb.y,
+      vx: (Math.random()-0.5)*1.5,
+      vy: (Math.random()-0.5)*1.5 - 0.5,
+      r: 3 + Math.random()*3,
+      life: 1,
+      color: `hsl(${20+Math.random()*30},100%,${50+Math.random()*20}%)`
+    });
+
+    // Hit fish
+    state.fish.forEach(f => {
+      if (f.floating || f.collected) return;
+      const fdx = fb.x - f.x, fdy = fb.y - f.y;
+      if (Math.sqrt(fdx*fdx+fdy*fdy) < f.type.size + 6) {
+        const dmg = getEffectiveSpellDamage();
+        f.hp -= dmg;
+        f.flashTimer = 8;
+        f.stunTimer = 60;
+        state.damageNumbers.push({ x:f.x, y:f.y-f.type.size, val:Math.ceil(dmg), life:1 });
+        if (f.hp <= 0) {
+          f.floating = true;
+          f.floatY = f.y;
+          f.floatTimer = 0;
+          f.vx = 0;
         }
+        fb.life -= 0.3;
+      }
+    });
+
+    if (fb.life <= 0 || fb.y > FLOOR_Y || fb.x < 0 || fb.x > WORLD_W) {
+      state.activeFirball = null;
+      state.castTouchId = null;
+      state.castTouchPos = null;
     }
+  }
 
-    // Update fish
-    for (let f of state.fishes) {
-        if (!f.alive) continue;
+  // --- Particles ---
+  state.particles.forEach(p => {
+    p.x += p.vx; p.y += p.vy; p.life -= 0.04;
+  });
+  state.particles = state.particles.filter(p => p.life > 0);
 
-        // swim
-        f.x += f.speed * f.dir;
-        f.y += f.vertSpeed;
-        f.y = clamp(f.y, f.type.minDepth, f.type.maxDepth);
+  // --- Damage numbers ---
+  state.damageNumbers.forEach(d => { d.y -= 0.7; d.life -= 0.025; });
+  state.damageNumbers = state.damageNumbers.filter(d => d.life > 0);
 
-        // turn timer
-        f.turnTimer--;
-        if (f.turnTimer <= 0) {
-            f.dir *= -1;
-            f.vertSpeed = rnd(-0.15, 0.15);
-            f.turnTimer = Math.floor(rnd(60, 300));
-        }
-
-        // world wrap
-        if (f.x < -20) f.x = WORLD_W + 20;
-        if (f.x > WORLD_W + 20) f.x = -20;
-
-        // hit flash decay
-        if (f.hitFlash > 0) f.hitFlash--;
+  // --- Fish AI ---
+  state.fish.forEach(f => {
+    if (f.collected) return;
+    if (f.floating) {
+      // Float to surface
+      f.floatTimer++;
+      const targetY = WATER_Y - f.type.size * 0.4;
+      f.y += (targetY - f.y) * 0.05;
+      return;
     }
+    f.flashTimer = Math.max(0, f.flashTimer - 1);
+    f.stunTimer = Math.max(0, f.stunTimer - 1);
+    if (f.stunTimer > 0) return;
+    // Swim
+    f.x += f.vx;
+    // Bounce off walls
+    if (f.x < SHORE_X + 40) { f.vx = Math.abs(f.vx); }
+    if (f.x > WORLD_W - 40) { f.vx = -Math.abs(f.vx); }
+    // Random direction changes
+    if (Math.random() < 0.005) f.vx *= -1;
+  });
 
-    // Update spells
-    for (let s of state.spells) {
-        if (!s.alive) continue;
-        s.age++;
+  // --- Tap floating fish to collect ---
+  // (handled in tap logic below)
 
-        // depth penalty — damage decreases with depth
-        const depthFactor = 1 - (s.y - WATER_Y) * s.def.depthPenalty;
+  // --- Bubbles ---
+  state.bubbles.forEach(b => {
+    b.y -= b.speed;
+    b.wobble += 0.05;
+    b.x += Math.sin(b.wobble) * 0.3;
+    if (b.y < WATER_Y) b.y = FLOOR_Y - 5;
+  });
 
-        // move toward drag position or continue forward
-        if (state.spellDragPos && state.spellTouchId !== null) {
-            const tx = state.spellDragPos.x + state.camX;
-            const ty = state.spellDragPos.y;
-            const dx = tx - s.x;
-            const dy = ty - s.y;
-            const d = Math.sqrt(dx * dx + dy * dy);
-            if (d > 1) {
-                s.x += (dx / d) * s.def.speed;
-                s.y += (dy / d) * s.def.speed;
-            }
-        } else if (mouseSpellActive && state.spellDragPos) {
-            const tx = state.spellDragPos.x + state.camX;
-            const ty = state.spellDragPos.y;
-            const dx = tx - s.x;
-            const dy = ty - s.y;
-            const d = Math.sqrt(dx * dx + dy * dy);
-            if (d > 1) {
-                s.x += (dx / d) * s.def.speed;
-                s.y += (dy / d) * s.def.speed;
-            }
-        } else {
-            s.y += s.def.speed * 0.5;
-        }
+  // --- Clouds ---
+  state.clouds.forEach(c => {
+    c.x += c.speed;
+    if (c.x > WORLD_W + 200) c.x = -200;
+  });
 
-        // keep in water
-        s.y = clamp(s.y, WATER_Y + 2, SEA_FLOOR_Y - 2);
-        s.x = clamp(s.x, 0, WORLD_W);
+  // --- Dialogue ---
+  if (state.dialogueTimer > 0) state.dialogueTimer--;
+  if (state.dialogueTimer <= 0) state.dialogue = null;
 
-        // trail
-        s.trail.push({ x: s.x, y: s.y, age: 0 });
-        if (s.trail.length > 20) s.trail.shift();
-        for (let t of s.trail) t.age++;
+  // --- Notification ---
+  if (state.notifTimer > 0) state.notifTimer--;
 
-        // check collision with fish
-        for (let f of state.fishes) {
-            if (!f.alive) continue;
-            const d = dist(s.x, s.y, f.x, f.y);
-            if (d < s.def.radius + Math.max(f.type.w, f.type.h) / 2) {
-                const dmg = Math.max(1, Math.round(s.def.damage * Math.max(0.1, depthFactor)));
-                f.hp -= dmg;
-                f.hitFlash = 6;
-                spawnHitParticles(f.x, f.y, s.def.trail);
-                spawnDamageNumber(f.x, f.y - 8, dmg);
+  // --- Respawn ---
+  checkRespawn();
+  state.fish = state.fish.filter(f => !f.collected || f.collectAnim < 1);
+  state.fish.forEach(f => { if (f.collected) f.collectAnim += 0.08; });
 
-                if (f.hp <= 0) {
-                    f.alive = false;
-                    // create floating fish
-                    state.floatingFish.push({
-                        x: f.x,
-                        y: f.y,
-                        targetY: WATER_Y + 2,
-                        type: f.type,
-                        bobPhase: Math.random() * Math.PI * 2,
-                        collected: false
-                    });
-                    // big particle burst
-                    for (let p = 0; p < 8; p++) {
-                        state.particles.push({
-                            x: f.x, y: f.y,
-                            vx: rnd(-2, 2), vy: rnd(-2, 2),
-                            life: 30, maxLife: 30,
-                            color: f.type.color, size: 3
-                        });
-                    }
-                }
-            }
-        }
+  // --- Shop slide animation ---
+  const slideTarget = state.shopOpen ? 1 : 0;
+  state.shopSlide += (slideTarget - state.shopSlide) * 0.18;
+  if (Math.abs(state.shopSlide - slideTarget) < 0.001) state.shopSlide = slideTarget;
 
-        // expire
-        if (s.age >= s.def.duration) {
-            s.alive = false;
-        }
-    }
-
-    // Clean dead spells
-    state.spells = state.spells.filter(s => s.alive);
-
-    // Update floating fish (rise to surface)
-    for (let ff of state.floatingFish) {
-        if (ff.y > ff.targetY) {
-            ff.y -= 0.5;
-        }
-        ff.bobPhase += 0.05;
-    }
-
-    // Update particles
-    for (let p of state.particles) {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.life--;
-    }
-    state.particles = state.particles.filter(p => p.life > 0);
-
-    // Update damage numbers
-    for (let d of state.damageNumbers) {
-        d.y -= 0.5;
-        d.life--;
-    }
-    state.damageNumbers = state.damageNumbers.filter(d => d.life > 0);
-
-    // Respawn fish if too few
-    const aliveFish = state.fishes.filter(f => f.alive).length;
-    if (aliveFish < 15) {
-        state.fishes = state.fishes.filter(f => f.alive);
-        spawnFish(5);
-    }
+  // --- Shop proximity auto-open hint ---
+  if (state.boat.x < SHORE_X + 80 && !state.shopOpen && totalInventoryCount() > 0 && Date.now() - state.lastSaleTime > 5000) {
+    // Just a subtle cue — could show here
+  }
 }
 
-// =====================  DRAW  ==========================
+// Tap to collect fish
+function tapCollect(gx, gy) {
+  const wx = gx + state.camera;
+  const wy = gy;
+  for (const f of state.fish) {
+    if (!f.floating || f.collected) continue;
+    const dx = wx - f.x, dy = wy - f.y;
+    if (Math.sqrt(dx*dx+dy*dy) < f.type.size + 14) {
+      const cap = getEffectiveInventoryCap();
+      if (totalInventoryCount() >= cap) {
+        notify("Inventory full! Head to shore.", '#ff9f43');
+        return;
+      }
+      f.collected = true;
+      addToInventory(f.type);
+      state.damageNumbers.push({ x:f.x, y:f.y-f.type.size-6, val:'+1', life:1.5, color:'#7fff7f' });
+      return;
+    }
+  }
+}
+
+// Intercept taps on canvas for fish collection
+canvas.addEventListener('click', e => {
+  if (state.shopOpen) return;
+  tapCollect(toGameX(e.clientX), toGameY(e.clientY));
+});
+
+// Also on touchend for mobile fish collection
+canvas.addEventListener('touchend', e => {
+  if (state.shopOpen) return;
+  for (const t of e.changedTouches) {
+    if (t.identifier !== state.leftTouchId && t.identifier !== state.rightTouchId) {
+      tapCollect(toGameX(t.clientX), toGameY(t.clientY));
+    }
+  }
+}, { passive:false });
+
+// ============================================================
+// DRAW
+// ============================================================
+
+function drawRoundRect(x,y,w,h,r,fill,stroke,strokeW=1) {
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y);
+  ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r);
+  ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+  ctx.lineTo(x+r,y+h);
+  ctx.arcTo(x,y+h,x,y+h-r,r);
+  ctx.lineTo(x,y+r);
+  ctx.arcTo(x,y,x+r,y,r);
+  ctx.closePath();
+  if (fill) { ctx.fillStyle=fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle=stroke; ctx.lineWidth=strokeW; ctx.stroke(); }
+}
+
 function drawSky() {
-    const grad = ctx.createLinearGradient(0, UI_H, 0, WATER_Y);
-    grad.addColorStop(0, '#4a90d9');
-    grad.addColorStop(1, '#87ceeb');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, UI_H, W, WATER_Y - UI_H);
+  const grad = ctx.createLinearGradient(0,0,0,WATER_Y);
+  grad.addColorStop(0,'#0a1628');
+  grad.addColorStop(0.4,'#1a3a6b');
+  grad.addColorStop(1,'#2e6ba8');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,GAME_W,WATER_Y);
 }
 
 function drawClouds() {
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    for (let c of state.clouds) {
-        const sx = c.x - state.camX * c.parallax;
-        const wx = ((sx % (W + c.w + 40)) + W + c.w + 40) % (W + c.w + 40) - c.w - 20;
-        ctx.beginPath();
-        ctx.ellipse(wx + c.w * 0.3, c.y + c.h * 0.5, c.w * 0.3, c.h * 0.5, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(wx + c.w * 0.55, c.y + c.h * 0.3, c.w * 0.3, c.h * 0.55, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(wx + c.w * 0.75, c.y + c.h * 0.5, c.w * 0.25, c.h * 0.45, 0, 0, Math.PI * 2);
-        ctx.fill();
-    }
+  state.clouds.forEach(c => {
+    const sx = c.x - state.camera;
+    if (sx < -200 || sx > GAME_W+200) return;
+    ctx.globalAlpha = c.alpha * 0.7;
+    ctx.fillStyle = '#c8e6ff';
+    ctx.beginPath();
+    ctx.ellipse(sx, c.y, c.w, c.h*0.5, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(sx-c.w*0.25, c.y+2, c.w*0.55, c.h*0.4, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(sx+c.w*0.28, c.y+4, c.w*0.45, c.h*0.38, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  });
 }
 
-function drawWater() {
-    const grad = ctx.createLinearGradient(0, WATER_Y, 0, SEA_FLOOR_Y);
-    grad.addColorStop(0, '#1a6ea0');
-    grad.addColorStop(0.3, '#155a85');
-    grad.addColorStop(0.6, '#0e4268');
-    grad.addColorStop(1, '#081e38');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, WATER_Y, W, SEA_FLOOR_Y - WATER_Y);
+function drawShore() {
+  const sx = SHORE_X - state.camera;
 
-    ctx.fillStyle = '#3aadd9';
-    for (let x = -4; x < W + 4; x += 4) {
-        const worldX = x + state.camX;
-        const waveY = WATER_Y + Math.sin((worldX * 0.04) + state.time * 0.05) * 2
-                     + Math.sin((worldX * 0.08) + state.time * 0.03) * 1;
-        ctx.fillRect(x, waveY - 1, 4, 3);
-    }
+  // Sandy beach/cliff
+  const grad = ctx.createLinearGradient(0,0,0,GAME_H);
+  grad.addColorStop(0,'#c8a96e');
+  grad.addColorStop(1,'#8b6914');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(sx-80, 0);
+  ctx.lineTo(sx+10, 0);
+  ctx.lineTo(sx+20, WATER_Y);
+  ctx.lineTo(sx+30, GAME_H);
+  ctx.lineTo(0, GAME_H);
+  ctx.lineTo(0, 0);
+  ctx.closePath();
+  ctx.fill();
 
-    ctx.fillStyle = 'rgba(180, 230, 255, 0.2)';
-    for (let x = 0; x < W; x += 6) {
-        const worldX = x + state.camX;
-        if (Math.sin(worldX * 0.1 + state.time * 0.08) > 0.6) {
-            ctx.fillRect(x, WATER_Y + 3, 4, 1);
-        }
-    }
+  // Shore edge cliff detail
+  ctx.fillStyle = '#a87c3a';
+  ctx.beginPath();
+  ctx.moveTo(sx+5,WATER_Y-8);
+  ctx.lineTo(sx+25,WATER_Y+10);
+  ctx.lineTo(sx-10,WATER_Y+10);
+  ctx.closePath();
+  ctx.fill();
 
-    // light rays
+  // Dock/pier
+  ctx.fillStyle = '#7a5230';
+  ctx.fillRect(sx-4, WATER_Y-8, 55, 6);   // dock platform
+  ctx.fillRect(sx+8, WATER_Y-2, 6, 30);    // post 1
+  ctx.fillRect(sx+32, WATER_Y-2, 6, 30);   // post 2
+
+  // Fishmonger hut
+  const hx = sx - 72, hy = WATER_Y - 62;
+  // Hut body
+  drawRoundRect(hx, hy+12, 68, 50, 3, '#8b5e3c', '#5c3a1e', 2);
+  // Roof
+  ctx.fillStyle = '#c0392b';
+  ctx.beginPath();
+  ctx.moveTo(hx-6, hy+12);
+  ctx.lineTo(hx+34, hy-8);
+  ctx.lineTo(hx+74, hy+12);
+  ctx.closePath();
+  ctx.fill();
+  // Sign
+  drawRoundRect(hx+8, hy+18, 52, 14, 2, '#f5c842', '#a07820', 1);
+  ctx.fillStyle = '#3a2000';
+  ctx.font = 'bold 6px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText("FISHMONGER", hx+34, hy+28);
+  // Door
+  drawRoundRect(hx+24, hy+42, 18, 20, 2, '#5c3a1e', '#3a2000', 1);
+  // Window
+  drawRoundRect(hx+6, hy+38, 14, 12, 2, '#a8d8ea', '#5c3a1e', 1);
+  ctx.strokeStyle='#5c3a1e'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(hx+13,hy+38); ctx.lineTo(hx+13,hy+50); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(hx+6,hy+44); ctx.lineTo(hx+20,hy+44); ctx.stroke();
+
+  // Fishmonger NPC (old man pixel art)
+  const nx = sx - 20, ny = WATER_Y - 38;
+  // Body
+  ctx.fillStyle = '#8b6914';
+  ctx.fillRect(nx-5, ny+10, 12, 16);
+  // Head
+  ctx.fillStyle = '#f5cba7';
+  ctx.fillRect(nx-4, ny+2, 10, 10);
+  // Hat
+  ctx.fillStyle = '#2c3e50';
+  ctx.fillRect(nx-6, ny, 14, 4);
+  ctx.fillRect(nx-3, ny-6, 8, 7);
+  // White beard
+  ctx.fillStyle = '#ecf0f1';
+  ctx.fillRect(nx-3, ny+9, 8, 4);
+  // Eyes
+  ctx.fillStyle = '#2c3e50';
+  ctx.fillRect(nx-2, ny+4, 2, 2);
+  ctx.fillRect(nx+4, ny+4, 2, 2);
+  // Fishing rod (leaning)
+  ctx.strokeStyle = '#7a5230';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(nx+8, ny+8);
+  ctx.lineTo(nx+28, ny-18);
+  ctx.stroke();
+  ctx.strokeStyle = '#aaa';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(nx+28, ny-18);
+  ctx.lineTo(nx+35, ny+5);
+  ctx.stroke();
+  // Feet/legs
+  ctx.fillStyle = '#5d4037';
+  ctx.fillRect(nx-4, ny+24, 5, 6);
+  ctx.fillRect(nx+2, ny+24, 5, 6);
+
+  ctx.textAlign = 'left';
+}
+
+function drawOcean() {
+  // Ocean body
+  const grad = ctx.createLinearGradient(0, WATER_Y, 0, FLOOR_Y);
+  grad.addColorStop(0,'#0d4f8b');
+  grad.addColorStop(0.4,'#083566');
+  grad.addColorStop(1,'#041f3e');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, WATER_Y, GAME_W, FLOOR_Y - WATER_Y);
+
+  // Sandy floor
+  const floorGrad = ctx.createLinearGradient(0, FLOOR_Y-10, 0, GAME_H);
+  floorGrad.addColorStop(0,'#c4a265');
+  floorGrad.addColorStop(1,'#a07850');
+  ctx.fillStyle = floorGrad;
+  ctx.fillRect(0, FLOOR_Y, GAME_W, GAME_H - FLOOR_Y);
+
+  // Light rays
+  state.lightRays.forEach(r => {
+    const rx = r.x - state.camera;
+    if (rx < -100 || rx > GAME_W + 100) return;
     ctx.save();
-    for (let i = 0; i < 6; i++) {
-        const rx = (i * 90 + state.time * 0.2) % (W + 100) - 50;
-        const grad2 = ctx.createLinearGradient(rx, WATER_Y, rx + 15, SEA_FLOOR_Y);
-        grad2.addColorStop(0, 'rgba(100,200,255,0.06)');
-        grad2.addColorStop(1, 'rgba(100,200,255,0)');
-        ctx.fillStyle = grad2;
-        ctx.beginPath();
-        ctx.moveTo(rx, WATER_Y);
-        ctx.lineTo(rx + 8, WATER_Y);
-        ctx.lineTo(rx + 25, SEA_FLOOR_Y);
-        ctx.lineTo(rx + 5, SEA_FLOOR_Y);
-        ctx.closePath();
-        ctx.fill();
-    }
+    ctx.translate(rx, WATER_Y);
+    ctx.rotate(r.angle);
+    const rg = ctx.createLinearGradient(0,0,0,FLOOR_Y-WATER_Y);
+    rg.addColorStop(0, `rgba(100,200,255,${r.alpha*1.5})`);
+    rg.addColorStop(1, 'rgba(100,200,255,0)');
+    ctx.fillStyle = rg;
+    ctx.beginPath();
+    ctx.moveTo(-r.width/2, 0);
+    ctx.lineTo(r.width/2, 0);
+    ctx.lineTo(r.width*1.5, FLOOR_Y-WATER_Y);
+    ctx.lineTo(-r.width*1.5, FLOOR_Y-WATER_Y);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
-}
+  });
 
-function drawBubbles() {
-    for (let b of state.bubbles) {
-        const sx = b.x - state.camX;
-        if (sx < -5 || sx > W + 5) continue;
-        ctx.strokeStyle = 'rgba(150, 220, 255, 0.4)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(sx, b.y, b.r, 0, Math.PI * 2);
-        ctx.stroke();
+  // Seaweed
+  state.seaweeds.forEach(sw => {
+    const sx = sw.x - state.camera;
+    if (sx < -20 || sx > GAME_W+20) return;
+    ctx.strokeStyle = '#1a7a3a';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    let cx = sx, cy = FLOOR_Y;
+    ctx.moveTo(cx, cy);
+    for (let s=0; s<sw.segments; s++) {
+      const t = (s+1)/sw.segments;
+      const segH = sw.h / sw.segments;
+      cx = sx + Math.sin(sw.phase + t*3 + Date.now()*0.001) * 6;
+      cy = FLOOR_Y - t * sw.h;
+      ctx.lineTo(cx, cy);
     }
-}
+    ctx.stroke();
+    // Tip bulb
+    ctx.fillStyle = '#2ecc71';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 3.5, 5, 0.3, 0, Math.PI*2);
+    ctx.fill();
+  });
 
-function drawSeaweed() {
-    for (let w of state.weeds) {
-        const sx = w.x - state.camX;
-        if (sx < -20 || sx > W + 20) continue;
-        ctx.strokeStyle = w.color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        let bx = sx;
-        let by = SEA_FLOOR_Y;
-        ctx.moveTo(bx, by);
-        for (let s = 0; s < w.segments; s++) {
-            const sway = Math.sin(state.time * 0.03 + w.phase + s * 0.8) * 3;
-            by -= w.segH;
-            bx += sway;
-            ctx.lineTo(bx, by);
-        }
-        ctx.stroke();
-        ctx.fillStyle = w.color;
-        ctx.beginPath();
-        ctx.arc(bx, by, 2, 0, Math.PI * 2);
-        ctx.fill();
-    }
-}
+  // Bubbles
+  state.bubbles.forEach(b => {
+    const bx = b.x - state.camera;
+    if (bx < 0 || bx > GAME_W) return;
+    ctx.strokeStyle = 'rgba(150,220,255,0.5)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.arc(bx, b.y, b.r, 0, Math.PI*2);
+    ctx.stroke();
+  });
 
-function drawSandFloor() {
-    ctx.fillStyle = '#d4a44a';
-    ctx.fillRect(0, SEA_FLOOR_Y, W, H - SEA_FLOOR_Y);
-    ctx.fillStyle = '#c89838';
-    ctx.fillRect(0, SEA_FLOOR_Y, W, 2);
-    for (let d of state.sandDetails) {
-        const sx = d.x - state.camX;
-        if (sx < -5 || sx > W + 5) continue;
-        ctx.fillStyle = d.color;
-        ctx.beginPath();
-        ctx.arc(sx, d.y, d.r, 0, Math.PI * 2);
-        ctx.fill();
-    }
+  // Wave shimmer on surface
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 1.5;
+  for (let i=0; i<8; i++) {
+    const wx = ((i * 90) - (state.camera * 0.3) % (GAME_W+200));
+    ctx.beginPath();
+    ctx.moveTo(wx, WATER_Y+1);
+    ctx.quadraticCurveTo(wx+20, WATER_Y-3, wx+40, WATER_Y+1);
+    ctx.stroke();
+  }
 }
 
 function drawFish() {
-    for (let f of state.fishes) {
-        if (!f.alive) continue;
-        const sx = f.x - state.camX;
-        if (sx < -30 || sx > W + 30) continue;
-
-        ctx.save();
-        ctx.translate(sx, f.y);
-        ctx.scale(f.dir, 1);
-
-        // body
-        ctx.fillStyle = f.hitFlash > 0 ? '#ffffff' : f.type.color;
-        ctx.fillRect(-f.type.w / 2, -f.type.h / 2, f.type.w, f.type.h);
-
-        // darker belly
-        ctx.fillStyle = f.hitFlash > 0 ? '#dddddd' : f.type.color2;
-        ctx.fillRect(-f.type.w / 2, 0, f.type.w, f.type.h / 2);
-
-        // tail
-        ctx.fillStyle = f.type.color2;
-        ctx.fillRect(-f.type.w / 2 - 3, -f.type.h / 2 + 1, 3, f.type.h - 2);
-
-        // eye
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(f.type.w / 2 - 3, -f.type.h / 2 + 1, 2, 2);
-        ctx.fillStyle = '#000';
-        ctx.fillRect(f.type.w / 2 - 2, -f.type.h / 2 + 1, 1, 1);
-
-        ctx.restore();
-
-        // HP bar (only show if damaged)
-        if (f.hp < f.maxHp) {
-            const barW = f.type.w + 4;
-            const barH = 2;
-            const bx = sx - barW / 2;
-            const by = f.y - f.type.h / 2 - 5;
-            ctx.fillStyle = '#333';
-            ctx.fillRect(bx, by, barW, barH);
-            ctx.fillStyle = '#ff4444';
-            ctx.fillRect(bx, by, barW * (f.hp / f.maxHp), barH);
-        }
+  state.fish.forEach(f => {
+    if (f.collected) {
+      const sc = 1 + f.collectAnim * 0.5;
+      const al = 1 - f.collectAnim;
+      ctx.globalAlpha = al;
+      ctx.save();
+      ctx.translate(f.x - state.camera, f.y);
+      ctx.scale(sc, sc);
+      drawFishShape(f, 0, 0, true);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+      return;
     }
+
+    const sx = f.x - state.camera;
+    if (sx < -40 || sx > GAME_W+40) return;
+
+    if (f.floating) {
+      // Collection ring pulse
+      const pulse = 0.5 + Math.sin(Date.now()*0.008) * 0.5;
+      ctx.strokeStyle = `rgba(255,215,0,${0.4+pulse*0.5})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(sx, f.y, f.type.size + 8 + pulse*4, 0, Math.PI*2);
+      ctx.stroke();
+    }
+
+    ctx.save();
+    ctx.translate(sx, f.y);
+    if (f.floating) {
+      ctx.rotate(Math.PI); // belly-up
+    } else {
+      const tilt = f.vx > 0 ? 0.1 : -0.1;
+      ctx.rotate(tilt);
+      if (f.vx < 0) ctx.scale(-1, 1);
+    }
+    drawFishShape(f, 0, 0, false);
+    ctx.restore();
+
+    // HP bar (when damaged)
+    if (!f.floating && f.hp < f.maxHp && f.flashTimer > 0) {
+      const bw = f.type.size * 2.5;
+      const bx = sx - bw/2, by = f.y - f.type.size - 8;
+      ctx.fillStyle = '#333';
+      ctx.fillRect(bx, by, bw, 4);
+      ctx.fillStyle = `hsl(${(f.hp/f.maxHp)*120},90%,45%)`;
+      ctx.fillRect(bx, by, bw * (f.hp/f.maxHp), 4);
+    }
+  });
 }
 
-function drawFloatingFish() {
-    for (let ff of state.floatingFish) {
-        const sx = ff.x - state.camX;
-        if (sx < -30 || sx > W + 30) continue;
-        const bob = Math.sin(ff.bobPhase) * 1.5;
-        const fy = ff.y + bob;
-
-        // belly up fish
-        ctx.save();
-        ctx.translate(sx, fy);
-        ctx.scale(1, -1); // flipped
-
-        ctx.fillStyle = ff.type.color;
-        ctx.fillRect(-ff.type.w / 2, -ff.type.h / 2, ff.type.w, ff.type.h);
-        ctx.fillStyle = ff.type.color2;
-        ctx.fillRect(-ff.type.w / 2, 0, ff.type.w, ff.type.h / 2);
-
-        ctx.restore();
-
-        // pulsing collect indicator
-        const pulse = Math.sin(state.time * 0.1) * 0.3 + 0.7;
-        ctx.strokeStyle = 'rgba(255, 215, 0, ' + pulse + ')';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(sx, fy, ff.type.w / 2 + 4, 0, Math.PI * 2);
-        ctx.stroke();
-    }
-}
-
-function drawSpells() {
-    for (let s of state.spells) {
-        if (!s.alive) continue;
-        const sx = s.x - state.camX;
-        const sy = s.y;
-
-        // trail
-        for (let i = 0; i < s.trail.length; i++) {
-            const t = s.trail[i];
-            const tx = t.x - state.camX;
-            const alpha = (1 - t.age / 25) * 0.5;
-            if (alpha <= 0) continue;
-            ctx.fillStyle = 'rgba(255, 170, 0, ' + alpha + ')';
-            const tr = s.def.radius * (1 - t.age / 25) * 0.6;
-            ctx.beginPath();
-            ctx.arc(tx, t.y, Math.max(1, tr), 0, Math.PI * 2);
-            ctx.fill();
-        }
-
-        // glow
-        const depthFactor = clamp(1 - (s.y - WATER_Y) * s.def.depthPenalty, 0.1, 1);
-        const glowR = s.def.radius + 4 * depthFactor;
-        ctx.fillStyle = 'rgba(255, 100, 0, ' + (0.15 * depthFactor) + ')';
-        ctx.beginPath();
-        ctx.arc(sx, sy, glowR, 0, Math.PI * 2);
-        ctx.fill();
-
-        // core
-        ctx.fillStyle = s.def.color;
-        ctx.beginPath();
-        ctx.arc(sx, sy, s.def.radius * depthFactor, 0, Math.PI * 2);
-        ctx.fill();
-
-        // bright center
-        ctx.fillStyle = '#ffee88';
-        ctx.beginPath();
-        ctx.arc(sx, sy, s.def.radius * 0.4 * depthFactor, 0, Math.PI * 2);
-        ctx.fill();
-    }
-}
-
-function drawParticles() {
-    for (let p of state.particles) {
-        const sx = p.x - state.camX;
-        const alpha = p.life / p.maxLife;
-        ctx.fillStyle = p.color;
-        ctx.globalAlpha = alpha;
-        ctx.fillRect(sx - p.size / 2, p.y - p.size / 2, p.size, p.size);
-    }
-    ctx.globalAlpha = 1;
-}
-
-function drawDamageNumbers() {
-    ctx.font = '7px monospace';
-    ctx.textAlign = 'center';
-    for (let d of state.damageNumbers) {
-        const sx = d.x - state.camX;
-        const alpha = d.life / d.maxLife;
-        ctx.fillStyle = 'rgba(255, 80, 80, ' + alpha + ')';
-        ctx.fillText(d.text, sx, d.y);
-    }
-    ctx.textAlign = 'left';
+function drawFishShape(f, ox, oy, ghost) {
+  const s = f.type.size;
+  if (f.flashTimer > 0 && !ghost) {
+    ctx.fillStyle = '#fff';
+  } else {
+    ctx.fillStyle = f.type.color;
+  }
+  // Body
+  ctx.beginPath();
+  ctx.ellipse(ox, oy, s, s*0.55, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Tail
+  ctx.beginPath();
+  ctx.moveTo(ox-s, oy);
+  ctx.lineTo(ox-s-s*0.6, oy-s*0.45);
+  ctx.lineTo(ox-s-s*0.6, oy+s*0.45);
+  ctx.closePath();
+  ctx.fill();
+  // Eye
+  if (!ghost) {
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(ox+s*0.45, oy-s*0.1, s*0.22, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = '#111';
+    ctx.beginPath();
+    ctx.arc(ox+s*0.5, oy-s*0.1, s*0.11, 0, Math.PI*2);
+    ctx.fill();
+  }
 }
 
 function drawBoat() {
-    const boat = state.boat;
-    const sx = boat.x - state.camX;
-    const sy = boat.y;
-    let tilt = 0;
-    if (state.leftBtnDown) tilt = 0.05;
-    if (state.rightBtnDown) tilt = -0.05;
+  const bx = state.boat.x - state.camera;
+  const by = state.boat.y;
 
-    ctx.save();
-    ctx.translate(sx, sy);
-    ctx.rotate(tilt);
+  ctx.save();
+  ctx.translate(bx, by + 6);
+  ctx.rotate(state.boat.tilt);
 
-    ctx.fillStyle = '#8B4513';
-    ctx.fillRect(-24, -2, 48, 10);
-    ctx.fillStyle = '#6B3410';
-    ctx.fillRect(-20, 8, 40, 3);
-    ctx.fillStyle = '#A0522D';
-    ctx.fillRect(-22, -4, 44, 3);
-    ctx.fillStyle = '#7B3F12';
-    ctx.fillRect(-12, 0, 2, 8);
-    ctx.fillRect(4, 0, 2, 8);
+  // Hull
+  ctx.fillStyle = '#8b4513';
+  ctx.beginPath();
+  ctx.moveTo(-28, 0);
+  ctx.lineTo(28, 0);
+  ctx.lineTo(22, 12);
+  ctx.lineTo(-22, 12);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#6b340f';
+  ctx.fillRect(-24, 10, 48, 3);
 
-    ctx.fillStyle = '#5a3a1a';
-    ctx.fillRect(-1, -28, 3, 26);
-    ctx.fillStyle = '#e8d8c0';
+  // Planks
+  ctx.strokeStyle = '#5c2a08';
+  ctx.lineWidth = 1;
+  for (let i=-20; i<20; i+=8) {
     ctx.beginPath();
-    ctx.moveTo(2, -26);
-    ctx.lineTo(2, -6);
-    ctx.lineTo(16, -6);
+    ctx.moveTo(i, 0);
+    ctx.lineTo(i+2, 12);
+    ctx.stroke();
+  }
+
+  // Wizard
+  // Robe
+  ctx.fillStyle = '#4a0080';
+  if (state.ownedUpgrades.includes('robe_fancy')) ctx.fillStyle = '#6a00b8';
+  ctx.fillRect(-8, -26, 16, 18);
+  // Stars on robe
+  ctx.fillStyle = '#ffd700';
+  ctx.font = '6px serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('✦', 0, -14);
+  // Head
+  ctx.fillStyle = '#f5cba7';
+  ctx.beginPath();
+  ctx.arc(0, -30, 7, 0, Math.PI*2);
+  ctx.fill();
+  // Eyes
+  ctx.fillStyle = '#2c3e50';
+  ctx.fillRect(-3,-31,2,2); ctx.fillRect(2,-31,2,2);
+  // Beard
+  ctx.fillStyle = '#bbb';
+  ctx.fillRect(-4,-24,8,4);
+
+  // Hat
+  let hatColor = '#4a0080';
+  if (state.ownedUpgrades.includes('hat_pointy')) hatColor = '#6a00b8';
+  if (state.ownedUpgrades.includes('hat_captain')) {
+    // Captain hat
+    ctx.fillStyle = '#2c3e50';
+    ctx.fillRect(-9,-40,18,6);
+    ctx.fillRect(-6,-52,12,13);
+    ctx.fillStyle = '#f5c842';
+    ctx.fillRect(-6,-41,12,2);
+  } else {
+    // Pointy wizard hat
+    ctx.fillStyle = hatColor;
+    ctx.beginPath();
+    ctx.moveTo(-9,-37);
+    ctx.lineTo(9,-37);
+    ctx.lineTo(3,-57);
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = '#6040a0';
-    ctx.fillRect(5, -18, 5, 5);
+    ctx.fillStyle = '#ffd700';
+    ctx.beginPath();
+    ctx.arc(3,-57,3,0,Math.PI*2);
+    ctx.fill();
+    // brim
+    ctx.fillStyle = hatColor;
+    ctx.fillRect(-11,-41,22,5);
+  }
 
-    // wizard
-    ctx.fillStyle = '#6040a0';
-    ctx.fillRect(-8, -12, 8, 9);
-    ctx.fillStyle = '#f0c8a0';
-    ctx.fillRect(-7, -16, 6, 5);
-    ctx.fillStyle = '#4020a0';
-    ctx.fillRect(-8, -20, 8, 4);
-    ctx.fillRect(-6, -23, 4, 3);
-    ctx.fillRect(-5, -25, 2, 2);
-    if (state.time % 40 < 20) {
-        ctx.fillStyle = '#ffee55';
-        ctx.fillRect(-5, -26, 2, 1);
-    }
+  // Arms/casting pose
+  ctx.strokeStyle = '#f5cba7';
+  ctx.lineWidth = 3;
+  if (state.activeFirball) {
+    // Raised casting arm
+    ctx.beginPath();
+    ctx.moveTo(6,-22);
+    ctx.lineTo(18,-32);
+    ctx.stroke();
+    // Magic glow at hand
+    ctx.fillStyle = 'rgba(255,150,0,0.8)';
+    ctx.beginPath();
+    ctx.arc(18,-32,4,0,Math.PI*2);
+    ctx.fill();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(-7,-22); ctx.lineTo(-14,-14); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(7,-22); ctx.lineTo(14,-14); ctx.stroke();
+  }
 
-    ctx.restore();
+  ctx.restore();
+
+  // Wake
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(bx-30, by+10);
+  ctx.quadraticCurveTo(bx-50, by+8, bx-70, by+14);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(bx+30, by+10);
+  ctx.quadraticCurveTo(bx+50, by+8, bx+70, by+14);
+  ctx.stroke();
 }
 
-function drawUIBar() {
-    ctx.fillStyle = 'rgba(20, 12, 8, 0.85)';
-    ctx.fillRect(0, 0, W, UI_H);
-    ctx.fillStyle = '#8B6914';
-    ctx.fillRect(0, UI_H - 2, W, 2);
+function drawFireball() {
+  if (!state.activeFirball) return;
+  const fb = state.activeFirball;
+  const sx = fb.x - state.camera;
+  const sy = fb.y;
 
-    ctx.font = '7px monospace';
-    ctx.textBaseline = 'middle';
-    const midY = UI_H / 2;
+  // Glow
+  const grd = ctx.createRadialGradient(sx,sy,0,sx,sy,14);
+  grd.addColorStop(0,'rgba(255,220,80,0.9)');
+  grd.addColorStop(0.4,'rgba(255,100,0,0.5)');
+  grd.addColorStop(1,'rgba(255,50,0,0)');
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.arc(sx,sy,14,0,Math.PI*2);
+  ctx.fill();
 
-    // HP
-    const hpX = 6;
-    const hpW = 60;
-    const hpBarH = 7;
-    const hpPct = state.hp / state.maxHp;
-    ctx.fillStyle = '#333';
-    ctx.fillRect(hpX, midY - hpBarH / 2, hpW, hpBarH);
-    ctx.fillStyle = hpPct > 0.5 ? '#44bb44' : hpPct > 0.25 ? '#ccaa22' : '#cc3333';
-    ctx.fillRect(hpX + 1, midY - hpBarH / 2 + 1, (hpW - 2) * hpPct, hpBarH - 2);
-    ctx.fillStyle = '#fff';
-    ctx.fillText('HP', hpX + 2, midY + 1);
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(sx,sy,4,0,Math.PI*2);
+  ctx.fill();
+}
 
-    // Fish
-    const fishX = 80;
-    ctx.fillStyle = '#66ccff';
-    ctx.fillRect(fishX, midY - 2, 5, 3);
-    ctx.fillRect(fishX + 5, midY - 1, 2, 1);
-    ctx.fillStyle = '#fff';
-    ctx.fillText(state.fish + '/' + state.fishCap, fishX + 10, midY + 1);
-
-    // Scales
-    const scX = 140;
-    ctx.fillStyle = '#ffd700';
+function drawParticles() {
+  state.particles.forEach(p => {
+    const sx = p.x - state.camera;
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
     ctx.beginPath();
-    ctx.moveTo(scX + 3, midY - 4);
-    ctx.lineTo(scX + 6, midY);
-    ctx.lineTo(scX + 3, midY + 4);
-    ctx.lineTo(scX, midY);
-    ctx.closePath();
+    ctx.arc(sx, p.y, p.r * p.life, 0, Math.PI*2);
     ctx.fill();
-    ctx.fillStyle = '#ffd700';
-    ctx.fillText(state.scales, scX + 10, midY + 1);
+  });
+  ctx.globalAlpha = 1;
+}
 
-    // Spell indicator
-    const spX = 200;
-    ctx.fillStyle = '#ff6622';
-    ctx.beginPath();
-    ctx.arc(spX + 4, midY, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#ffcc88';
-    ctx.font = '6px monospace';
-    ctx.fillText('FIREBALL', spX + 12, midY + 1);
-
-    // Title
-    ctx.fillStyle = '#c8a84e';
-    ctx.font = '8px monospace';
+function drawDamageNumbers() {
+  state.damageNumbers.forEach(d => {
+    const sx = d.x - state.camera;
+    ctx.globalAlpha = d.life;
+    ctx.font = `bold ${7 + (1-d.life)*3}px monospace`;
+    ctx.fillStyle = d.color || '#ff6b35';
     ctx.textAlign = 'center';
-    ctx.fillText('FISHING WIZARD', W / 2 + 60, midY + 1);
+    ctx.fillText(d.val, sx, d.y);
+  });
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'left';
+}
+
+function drawUI() {
+  // Top bar background
+  ctx.fillStyle = 'rgba(0,0,10,0.75)';
+  ctx.fillRect(0,0,GAME_W,24);
+
+  // HP bar
+  const hpBarW = 60;
+  ctx.fillStyle = '#333';
+  ctx.fillRect(6,5,hpBarW,9);
+  const hpPct = state.hp / state.maxHp;
+  const hpColor = hpPct > 0.5 ? '#2ecc71' : hpPct > 0.25 ? '#f39c12' : '#e74c3c';
+  ctx.fillStyle = hpColor;
+  ctx.fillRect(6,5,hpBarW*hpPct,9);
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(6,5,hpBarW,9);
+  ctx.fillStyle = '#fff';
+  ctx.font = '6px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('HP', 36, 12);
+
+  // Fish count
+  const cap = getEffectiveInventoryCap();
+  const cnt = totalInventoryCount();
+  ctx.fillStyle = cnt >= cap ? '#ff6b35' : '#ffd700';
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 8px monospace';
+  ctx.fillText(`🐟 ${cnt}/${cap}`, 74, 14);
+
+  // Scales
+  ctx.fillStyle = '#c0ffa0';
+  ctx.fillText(`⚡${state.scales}`, 130, 14);
+
+  // Title
+  ctx.fillStyle = '#ffd700';
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 9px monospace';
+  ctx.fillText('✦ FISHING WIZARD ✦', GAME_W/2, 14);
+
+  // Spell indicator
+  ctx.fillStyle = '#ff9f43';
+  ctx.textAlign = 'right';
+  ctx.font = '7px monospace';
+  ctx.fillText('🔥FIREBALL', GAME_W-52, 14);
+
+  // Shop button (top right)
+  const nearShore = state.boat.x < SHORE_X + 100;
+  const shopBtnColor = nearShore ? 'rgba(255,215,0,0.85)' : 'rgba(100,100,100,0.6)';
+  drawRoundRect(GAME_W-48, 3, 44, 18, 3, shopBtnColor, '#fff', 0.5);
+  ctx.fillStyle = nearShore ? '#2c2c00' : '#aaa';
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 7px monospace';
+  ctx.fillText('SHOP', GAME_W-26, 14);
+  ctx.textAlign = 'left';
+
+  // Movement buttons
+  const btns = getButtons();
+  ['left','right'].forEach(dir => {
+    const b = btns[dir];
+    const active = dir==='left' ? state.leftTouchId!==null || state.keys['ArrowLeft'] || state.keys['a']
+                                : state.rightTouchId!==null || state.keys['ArrowRight'] || state.keys['d'];
+    drawRoundRect(b.x, b.y, b.w, b.h, 5, active?'rgba(255,255,255,0.35)':'rgba(255,255,255,0.15)', 'rgba(255,255,255,0.5)', 1);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText(dir==='left'?'◀':'▶', b.x+b.w/2, b.y+b.h/2+7);
+  });
+
+  // Cast button
+  const cb = btns.cast;
+  const castActive = state.castTouchId !== null;
+  drawRoundRect(cb.x, cb.y, cb.w, cb.h, 8, castActive?'rgba(255,150,0,0.5)':'rgba(255,150,0,0.25)', 'rgba(255,180,50,0.8)', 1.5);
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 10px monospace';
+  ctx.fillText('🔥', cb.x+cb.w/2, cb.y+cb.h/2+4);
+  ctx.font = '6px monospace';
+  ctx.fillText('CAST', cb.x+cb.w/2, cb.y+cb.h-6);
+  ctx.textAlign = 'left';
+
+  // Notification
+  if (state.notifTimer > 0 && state.notification) {
+    const al = Math.min(1, state.notifTimer/20);
+    ctx.globalAlpha = al;
+    const msg = state.notification.msg;
+    ctx.font = 'bold 9px monospace';
+    const mw = ctx.measureText(msg).width;
+    drawRoundRect(GAME_W/2 - mw/2 - 8, 28, mw+16, 16, 4, 'rgba(0,0,0,0.7)', state.notification.color, 1.5);
+    ctx.fillStyle = state.notification.color;
+    ctx.textAlign = 'center';
+    ctx.fillText(msg, GAME_W/2, 39);
     ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
 
-    // Menu
-    const menuX = W - 22;
-    ctx.fillStyle = '#ccc';
-    ctx.fillRect(menuX, midY - 4, 14, 2);
-    ctx.fillRect(menuX, midY, 14, 2);
-    ctx.fillRect(menuX, midY + 4, 14, 2);
-}
-
-function drawArrowButtons() {
-    const lb = getLeftBtnRect();
-    const rb = getRightBtnRect();
-
-    ctx.fillStyle = state.leftBtnDown ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)';
-    ctx.fillRect(lb.x, lb.y, lb.w, lb.h);
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(lb.x, lb.y, lb.w, lb.h);
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.beginPath();
-    ctx.moveTo(lb.x + 10, lb.y + lb.h / 2);
-    ctx.lineTo(lb.x + 26, lb.y + 8);
-    ctx.lineTo(lb.x + 26, lb.y + lb.h - 8);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.fillStyle = state.rightBtnDown ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)';
-    ctx.fillRect(rb.x, rb.y, rb.w, rb.h);
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-    ctx.strokeRect(rb.x, rb.y, rb.w, rb.h);
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.beginPath();
-    ctx.moveTo(rb.x + rb.w - 10, rb.y + rb.h / 2);
-    ctx.lineTo(rb.x + 10, rb.y + 8);
-    ctx.lineTo(rb.x + 10, rb.y + rb.h - 8);
-    ctx.closePath();
-    ctx.fill();
-}
-
-function drawSpellButton() {
-    const sb = getSpellBtnRect();
-    // glowing spell button
-    const pulse = Math.sin(state.time * 0.08) * 0.1 + 0.25;
-    ctx.fillStyle = 'rgba(255, 100, 0, ' + pulse + ')';
-    ctx.fillRect(sb.x, sb.y, sb.w, sb.h);
-    ctx.strokeStyle = 'rgba(255, 150, 50, 0.5)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(sb.x, sb.y, sb.w, sb.h);
-
-    // fireball icon
-    ctx.fillStyle = '#ff6622';
-    ctx.beginPath();
-    ctx.arc(sb.x + sb.w / 2, sb.y + sb.h / 2, 8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#ffcc44';
-    ctx.beginPath();
-    ctx.arc(sb.x + sb.w / 2, sb.y + sb.h / 2, 4, 0, Math.PI * 2);
-    ctx.fill();
-}
-
-function drawDepthMarkers() {
-    ctx.font = '6px monospace';
-    ctx.fillStyle = 'rgba(150,200,255,0.25)';
-    ctx.textAlign = 'right';
-    const zones = [
-        { y: WATER_Y + 15, label: '~ Shallows ~' },
-        { y: WATER_Y + 55, label: '~ Mid Waters ~' },
-        { y: SEA_FLOOR_Y - 25, label: '~ Deep ~' }
-    ];
-    for (let z of zones) {
-        ctx.fillText(z.label, W - 6, z.y);
+  // Dialogue bubble (fishmonger)
+  if (state.dialogue) {
+    const dy = WATER_Y - 75;
+    const bx = SHORE_X - state.camera - 60;
+    if (bx > -100 && bx < GAME_W + 100) {
+      const al = Math.min(1, state.dialogueTimer / 30);
+      ctx.globalAlpha = al;
+      ctx.font = '6px monospace';
+      const tw = ctx.measureText(state.dialogue).width;
+      const px = Math.max(4, Math.min(GAME_W - tw - 20, bx));
+      drawRoundRect(px, dy, tw+14, 14, 4, 'rgba(255,255,220,0.95)', '#8b6914', 1);
+      ctx.fillStyle = '#3a2000';
+      ctx.textAlign = 'left';
+      ctx.fillText(state.dialogue, px+7, dy+10);
+      ctx.globalAlpha = 1;
     }
+  }
+
+  // Shore prompt
+  if (state.boat.x < SHORE_X + 85 && !state.shopOpen && totalInventoryCount() > 0) {
+    ctx.fillStyle = 'rgba(255,215,0,0.9)';
+    ctx.font = 'bold 7px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('▲ SHOP', GAME_W/2, 36);
     ctx.textAlign = 'left';
+  }
+
+  // Minimap
+  const mm = { x:GAME_W-80, y:GAME_H-16, w:76, h:10 };
+  ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fillRect(mm.x,mm.y,mm.w,mm.h);
+  ctx.strokeStyle='#444'; ctx.lineWidth=1; ctx.strokeRect(mm.x,mm.y,mm.w,mm.h);
+  // Boat position
+  const bpx = mm.x + (state.boat.x / WORLD_W) * mm.w;
+  ctx.fillStyle='#ffd700'; ctx.fillRect(bpx-1, mm.y+2, 3, mm.h-4);
+  // Shore marker
+  const spx = mm.x + (SHORE_X / WORLD_W) * mm.w;
+  ctx.fillStyle='#c8a96e'; ctx.fillRect(spx, mm.y, 3, mm.h);
 }
 
-// =====================  MAIN LOOP  =====================
-function gameLoop() {
-    update();
-    ctx.clearRect(0, 0, W, H);
-    drawSky();
-    drawClouds();
-    drawWater();
-    drawBubbles();
-    drawSeaweed();
-    drawSandFloor();
-    drawDepthMarkers();
-    drawFish();
-    drawFloatingFish();
-    drawSpells();
-    drawParticles();
-    drawDamageNumbers();
-    drawBoat();
-    drawUIBar();
-    drawArrowButtons();
-    drawSpellButton();
-    requestAnimationFrame(gameLoop);
+// ============================================================
+// SHOP PANEL — Full-screen slide-up
+// ============================================================
+function drawShop() {
+  if (state.shopSlide < 0.002) return;
+
+  const slideY = Math.round(GAME_H * (1 - state.shopSlide));
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, slideY, GAME_W, GAME_H - slideY);
+  ctx.clip();
+
+  // Dark scrim behind panel
+  ctx.fillStyle = `rgba(0,0,0,${0.55 * state.shopSlide})`;
+  ctx.fillRect(0, 0, GAME_W, slideY);
+
+  // Panel body — deep parchment-dark with texture feel
+  const panelGrad = ctx.createLinearGradient(0, slideY, 0, GAME_H);
+  panelGrad.addColorStop(0, '#160e24');
+  panelGrad.addColorStop(1, '#0d0718');
+  ctx.fillStyle = panelGrad;
+  ctx.fillRect(0, slideY, GAME_W, GAME_H - slideY);
+
+  // Gold top border line
+  ctx.strokeStyle = '#c8960a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, slideY + 1);
+  ctx.lineTo(GAME_W, slideY + 1);
+  ctx.stroke();
+
+  // Decorative corner flourishes
+  drawCornerFlourish(8, slideY + 4, false);
+  drawCornerFlourish(GAME_W - 8, slideY + 4, true);
+
+  // ── Header bar ──
+  const headerH = 48;
+
+  // Tab backgrounds
+  const tabW = GAME_W / 2;
+  const sellActive = state.shopTab === 'sell';
+
+  // Sell tab
+  ctx.fillStyle = sellActive ? 'rgba(255,200,0,0.15)' : 'rgba(255,255,255,0.03)';
+  ctx.fillRect(0, slideY, tabW, headerH);
+
+  // Upgrades tab
+  ctx.fillStyle = !sellActive ? 'rgba(180,100,255,0.15)' : 'rgba(255,255,255,0.03)';
+  ctx.fillRect(tabW, slideY, tabW, headerH);
+
+  // Tab divider
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(tabW, slideY + 8);
+  ctx.lineTo(tabW, slideY + headerH - 8);
+  ctx.stroke();
+
+  // Active tab underline
+  ctx.strokeStyle = sellActive ? '#ffd700' : '#b87fff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(sellActive ? 12 : tabW + 12, slideY + headerH - 3);
+  ctx.lineTo(sellActive ? tabW - 12 : GAME_W - 12, slideY + headerH - 3);
+  ctx.stroke();
+
+  // Tab labels
+  ctx.font = 'bold 11px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = sellActive ? '#ffd700' : '#887799';
+  ctx.fillText('📦  SELL', tabW / 2, slideY + headerH - 14);
+  ctx.fillStyle = !sellActive ? '#b87fff' : '#887799';
+  ctx.fillText('✨  UPGRADE', tabW + tabW / 2, slideY + headerH - 14);
+
+  // Fishmonger portrait + name (sell tab)
+  if (sellActive) {
+    drawFishmongerPortrait(16, slideY + 6, 32);
+    ctx.fillStyle = '#c8a040';
+    ctx.font = '6px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText("Grimbold's", 52, slideY + 14);
+    ctx.font = 'bold 8px monospace';
+    ctx.fillStyle = '#ffd700';
+    ctx.fillText('FISH MARKET', 52, slideY + 24);
+    ctx.fillStyle = '#666';
+    ctx.font = '5px monospace';
+    ctx.fillText(`⚡ ${state.scales} Scales`, 52, slideY + 34);
+  } else {
+    ctx.fillStyle = '#a080cc';
+    ctx.font = '6px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText("Arcane", tabW + 8, slideY + 14);
+    ctx.font = 'bold 8px monospace';
+    ctx.fillStyle = '#b87fff';
+    ctx.fillText('UPGRADES', tabW + 8, slideY + 24);
+    ctx.fillStyle = '#666';
+    ctx.font = '5px monospace';
+    ctx.fillText(`⚡ ${state.scales} Scales`, tabW + 8, slideY + 34);
+  }
+
+  // Close button
+  drawCloseButton(GAME_W - 20, slideY + 14, 14);
+
+  // Horizontal rule below header
+  ctx.strokeStyle = '#2a1f3a';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, slideY + headerH);
+  ctx.lineTo(GAME_W, slideY + headerH);
+  ctx.stroke();
+
+  // Content area
+  const contentTop = slideY + headerH + 2;
+
+  if (state.shopTab === 'sell') {
+    drawShopSellPanel(contentTop);
+  } else {
+    drawShopUpgradesPanel(contentTop);
+  }
+
+  ctx.restore();
 }
 
-gameLoop();
+function drawCornerFlourish(x, y, flip) {
+  ctx.save();
+  if (flip) ctx.transform(-1, 0, 0, 1, x * 2, 0);
+  ctx.strokeStyle = '#c8960a';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y); ctx.lineTo(x + 12, y);
+  ctx.moveTo(x, y); ctx.lineTo(x, y + 10);
+  ctx.moveTo(x + 3, y + 3); ctx.arc(x + 3, y + 6, 3, -Math.PI/2, 0);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawCloseButton(cx, cy, r) {
+  // Circle background
+  ctx.fillStyle = 'rgba(200,50,50,0.25)';
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#cc4444'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.stroke();
+  ctx.strokeStyle = '#ff8888'; ctx.lineWidth = 1.5;
+  const d = r * 0.5;
+  ctx.beginPath();
+  ctx.moveTo(cx-d, cy-d); ctx.lineTo(cx+d, cy+d);
+  ctx.moveTo(cx+d, cy-d); ctx.lineTo(cx-d, cy+d);
+  ctx.stroke();
+}
+
+function drawFishmongerPortrait(x, y, size) {
+  // Head
+  ctx.fillStyle = '#d4956a';
+  ctx.beginPath(); ctx.arc(x + size/2, y + size*0.38, size*0.28, 0, Math.PI*2); ctx.fill();
+  // Hat
+  ctx.fillStyle = '#2c3e50';
+  ctx.fillRect(x + size*0.18, y + size*0.06, size*0.65, size*0.16);
+  ctx.fillRect(x + size*0.28, y - size*0.08, size*0.44, size*0.18);
+  // Eyes
+  ctx.fillStyle = '#333';
+  ctx.fillRect(x+size*0.34, y+size*0.30, size*0.08, size*0.08);
+  ctx.fillRect(x+size*0.56, y+size*0.30, size*0.08, size*0.08);
+  // Beard
+  ctx.fillStyle = '#ddd';
+  ctx.beginPath();
+  ctx.ellipse(x+size*0.5, y+size*0.6, size*0.22, size*0.14, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Body
+  ctx.fillStyle = '#6b4226';
+  ctx.fillRect(x+size*0.22, y+size*0.58, size*0.56, size*0.4);
+  // Apron
+  ctx.fillStyle = '#c8a84a';
+  ctx.fillRect(x+size*0.3, y+size*0.6, size*0.4, size*0.36);
+  // Border ring
+  ctx.strokeStyle = '#c8960a'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(x+size/2, y+size*0.5, size*0.5, 0, Math.PI*2); ctx.stroke();
+}
+
+function drawShopSellPanel(contentTop) {
+  const listBottom = GAME_H - 36;
+  const rowH = 36;
+
+  if (state.inventory.length === 0) {
+    // Empty state
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#443355';
+    ctx.font = 'bold 32px monospace';
+    ctx.globalAlpha = 0.4;
+    ctx.fillText('🐟', GAME_W/2, contentTop + 60);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#887799';
+    ctx.font = 'bold 9px monospace';
+    ctx.fillText('No fish in inventory!', GAME_W/2, contentTop + 80);
+    ctx.fillStyle = '#554466';
+    ctx.font = '7px monospace';
+    ctx.fillText('Cast spells, collect stunned fish,', GAME_W/2, contentTop + 94);
+    ctx.fillText('then return to shore to sell.', GAME_W/2, contentTop + 106);
+    ctx.textAlign = 'left';
+    return;
+  }
+
+  // Column headers
+  ctx.fillStyle = '#554466';
+  ctx.font = '6px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('FISH', 14, contentTop + 12);
+  ctx.textAlign = 'center';
+  ctx.fillText('QTY', GAME_W*0.52, contentTop + 12);
+  ctx.fillText('EACH', GAME_W*0.67, contentTop + 12);
+  ctx.fillText('TOTAL', GAME_W*0.82, contentTop + 12);
+  ctx.textAlign = 'left';
+
+  // Divider
+  ctx.strokeStyle = '#2a1f3a'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(8, contentTop + 15); ctx.lineTo(GAME_W - 8, contentTop + 15); ctx.stroke();
+
+  const listStartY = contentTop + 18;
+
+  // Clip list to above sell-all button
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, listStartY, GAME_W, listBottom - listStartY);
+  ctx.clip();
+
+  state.inventory.forEach((entry, i) => {
+    const ry = listStartY + i * rowH - state.shopScrollY;
+    if (ry + rowH < listStartY || ry > listBottom) return;
+
+    // Row bg alternating
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.15)';
+    ctx.fillRect(0, ry, GAME_W, rowH);
+
+    // Fish icon (mini fish shape)
+    ctx.save();
+    ctx.translate(20, ry + rowH/2);
+    drawMiniFish(entry.type.color, entry.type.size);
+    ctx.restore();
+
+    // Fish name
+    ctx.fillStyle = '#e8d8f8';
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(entry.type.name, 36, ry + rowH/2 - 3);
+
+    // Zone badge
+    const zoneCols = ['#2ecc71','#f39c12','#e74c3c'];
+    const zoneNames = ['Shallow','Mid','Deep'];
+    ctx.fillStyle = zoneCols[entry.type.zone] + '44';
+    drawRoundRect(36, ry + rowH/2 + 2, 36, 9, 2, zoneCols[entry.type.zone] + '33', zoneCols[entry.type.zone] + '88', 0.5);
+    ctx.fillStyle = zoneCols[entry.type.zone];
+    ctx.font = '5px monospace';
+    ctx.fillText(zoneNames[entry.type.zone], 38, ry + rowH/2 + 9);
+
+    // Count
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`×${entry.count}`, GAME_W*0.52, ry + rowH/2 + 4);
+
+    // Per-fish value with supply/demand indicator
+    const val = fishScaleValue({ type: entry.type });
+    const baseVal = entry.type.scales;
+    const discounted = val < baseVal;
+    ctx.fillStyle = discounted ? '#ff9f43' : '#ffd700';
+    ctx.font = 'bold 9px monospace';
+    ctx.fillText(`${val}⚡`, GAME_W*0.67, ry + rowH/2 + 4);
+    if (discounted) {
+      ctx.fillStyle = '#ff9f43';
+      ctx.font = '5px monospace';
+      ctx.fillText('LOW DEMAND', GAME_W*0.64, ry + rowH/2 + 12);
+    }
+
+    // Total
+    ctx.fillStyle = '#aaffaa';
+    ctx.font = 'bold 9px monospace';
+    ctx.fillText(`${val * entry.count}`, GAME_W*0.82, ry + rowH/2 + 4);
+
+    // Sell-one button
+    const btnX = GAME_W - 82;
+    const btnW = 76;
+    const btnY2 = ry + 6;
+    const btnH = rowH - 12;
+    const hovCol = 'rgba(255,180,0,0.2)';
+    drawRoundRect(btnX, btnY2, btnW, btnH, 4, hovCol, '#ffd700', 1);
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 7px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('SELL ×1', btnX + btnW/2, btnY2 + btnH/2 + 3);
+
+    // Row bottom divider
+    ctx.strokeStyle = '#1e1530';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0, ry + rowH - 0.5); ctx.lineTo(GAME_W, ry + rowH - 0.5); ctx.stroke();
+
+    ctx.textAlign = 'left';
+  });
+
+  ctx.restore(); // unclip
+
+  // Sell All bar — pinned at bottom
+  let total = 0;
+  state.inventory.forEach(e => total += fishScaleValue({type:e.type}) * e.count);
+
+  // Bar bg
+  const sellBarY = GAME_H - 36;
+  ctx.fillStyle = '#0d0718';
+  ctx.fillRect(0, sellBarY - 4, GAME_W, 40);
+  ctx.strokeStyle = '#2a1f3a'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, sellBarY-4); ctx.lineTo(GAME_W, sellBarY-4); ctx.stroke();
+
+  // Total label
+  ctx.fillStyle = '#887799';
+  ctx.font = '7px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('TOTAL VALUE', 12, sellBarY + 8);
+  ctx.fillStyle = '#aaffaa';
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText(`${total} ⚡`, 12, sellBarY + 22);
+
+  // Sell All button
+  const saBtnX = GAME_W / 2 - 10;
+  const saBtnW = GAME_W / 2 + 2;
+  drawRoundRect(saBtnX, sellBarY - 1, saBtnW, 32, 5, '#c8960a', '#ffd700', 1.5);
+  // Inner shine
+  ctx.fillStyle = 'rgba(255,255,200,0.12)';
+  drawRoundRect(saBtnX + 3, sellBarY + 1, saBtnW - 6, 12, 3, 'rgba(255,255,200,0.12)', 'transparent');
+  ctx.fillStyle = '#1a0c00';
+  ctx.font = 'bold 11px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(`SELL ALL  ${total} ⚡`, saBtnX + saBtnW/2, sellBarY + 20);
+  ctx.textAlign = 'left';
+}
+
+function drawMiniFish(color, size) {
+  const s = Math.min(size, 10);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, s, s*0.55, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-s, 0);
+  ctx.lineTo(-s-s*0.6, -s*0.4);
+  ctx.lineTo(-s-s*0.6, s*0.4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(s*0.45, -s*0.1, s*0.2, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = '#111';
+  ctx.beginPath();
+  ctx.arc(s*0.5, -s*0.1, s*0.1, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function drawShopUpgradesPanel(contentTop) {
+  const catNames = ['boat','spells','outfits'];
+  const catMeta = {
+    boat:    { label:'⚓  BOAT',     color:'#4fc3f7', icon:'⚓' },
+    spells:  { label:'🔥 SPELLS',   color:'#ff9f43', icon:'🔥' },
+    outfits: { label:'🧙 OUTFITS',  color:'#b87fff', icon:'🧙' },
+  };
+
+  let rowY = contentTop + 4 - state.shopScrollY;
+  const rowH = 38;
+
+  catNames.forEach(cat => {
+    const meta = catMeta[cat];
+    const catUpgs = UPGRADES.filter(u => u.category === cat);
+
+    // Category header
+    if (rowY + 26 > contentTop && rowY < GAME_H) {
+      ctx.fillStyle = meta.color + '22';
+      ctx.fillRect(0, rowY, GAME_W, 26);
+      ctx.strokeStyle = meta.color + '55';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, rowY); ctx.lineTo(GAME_W, rowY); ctx.stroke();
+
+      ctx.fillStyle = meta.color;
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(meta.label, 12, rowY + 17);
+
+      // Owned count
+      const owned = catUpgs.filter(u => state.ownedUpgrades.includes(u.id)).length;
+      ctx.fillStyle = '#554466';
+      ctx.font = '6px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(`${owned}/${catUpgs.length} owned`, GAME_W - 12, rowY + 17);
+    }
+    rowY += 26;
+
+    catUpgs.forEach(upg => {
+      const isOwned    = state.ownedUpgrades.includes(upg.id);
+      const isUnlocked = upgradeUnlocked(upg);
+      const canAfford  = state.scales >= upg.cost;
+
+      if (rowY + rowH > contentTop && rowY < GAME_H) {
+        // Row bg
+        const rowBg = isOwned
+          ? 'rgba(0,180,80,0.1)'
+          : !isUnlocked
+            ? 'rgba(40,30,50,0.6)'
+            : 'rgba(255,255,255,0.04)';
+        ctx.fillStyle = rowBg;
+        ctx.fillRect(0, rowY, GAME_W, rowH);
+
+        // Left accent bar
+        ctx.fillStyle = isOwned ? '#2ecc71' : !isUnlocked ? '#333' : meta.color + '88';
+        ctx.fillRect(0, rowY, 3, rowH);
+
+        // Upgrade name
+        ctx.fillStyle = isOwned ? '#7fffc4' : !isUnlocked ? '#55446677' : '#e8d8f8';
+        ctx.font = `bold 9px monospace`;
+        ctx.textAlign = 'left';
+        ctx.fillText(upg.name, 12, rowY + 14);
+
+        // Description
+        ctx.fillStyle = isOwned ? '#2ecc71' : !isUnlocked ? '#443355' : '#887799';
+        ctx.font = '7px monospace';
+        ctx.fillText(upg.desc, 12, rowY + 26);
+
+        // Right side: button or status
+        if (isOwned) {
+          // Owned badge
+          ctx.fillStyle = 'rgba(0,200,80,0.2)';
+          drawRoundRect(GAME_W-88, rowY+8, 80, 22, 4, 'rgba(0,180,80,0.2)', '#2ecc71', 1);
+          ctx.fillStyle = '#2ecc71';
+          ctx.font = 'bold 8px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('✓  OWNED', GAME_W-48, rowY+22);
+
+        } else if (!isUnlocked) {
+          ctx.fillStyle = '#443355';
+          ctx.font = '6px monospace';
+          ctx.textAlign = 'right';
+          ctx.fillText(`🔒 Need: ${upg.requires}`, GAME_W-10, rowY+20);
+
+        } else {
+          // Buy button
+          const bCol = canAfford ? '#c8960a' : '#332244';
+          const tCol = canAfford ? '#1a0c00' : '#554466';
+          drawRoundRect(GAME_W-92, rowY+6, 84, 26, 4, bCol, canAfford?'#ffd700':'#443355', 1);
+          if (canAfford) {
+            ctx.fillStyle = 'rgba(255,255,200,0.15)';
+            drawRoundRect(GAME_W-89, rowY+7, 78, 10, 3, 'rgba(255,255,200,0.15)', 'transparent');
+          }
+          ctx.fillStyle = tCol;
+          ctx.font = 'bold 8px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(`${upg.cost} ⚡`, GAME_W-50, rowY+17);
+          ctx.font = '6px monospace';
+          ctx.fillText(canAfford ? 'TAP TO BUY' : 'need more ⚡', GAME_W-50, rowY+27);
+        }
+
+        // Divider
+        ctx.strokeStyle = '#1e1530'; ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(0, rowY+rowH-0.5); ctx.lineTo(GAME_W, rowY+rowH-0.5); ctx.stroke();
+
+        ctx.textAlign = 'left';
+      }
+      rowY += rowH;
+    });
+    rowY += 6;
+  });
+
+  // Scales footer
+  const footY = GAME_H - 22;
+  ctx.fillStyle = '#0d0718';
+  ctx.fillRect(0, footY - 2, GAME_W, 24);
+  ctx.strokeStyle = '#2a1f3a'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, footY-2); ctx.lineTo(GAME_W, footY-2); ctx.stroke();
+  ctx.fillStyle = '#554466';
+  ctx.font = '7px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('YOUR SCALES:', 12, footY + 14);
+  ctx.fillStyle = '#ffd700';
+  ctx.font = 'bold 11px monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText(`${state.scales} ⚡`, GAME_W - 12, footY + 14);
+  ctx.textAlign = 'left';
+}
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+function loop(timestamp) {
+  const dt = Math.min((timestamp - lastTime) / 16.67, 3);
+  lastTime = timestamp;
+
+  update(dt);
+
+  ctx.clearRect(0,0,GAME_W,GAME_H);
+  drawSky();
+  drawClouds();
+  drawShore();
+  drawOcean();
+  drawFish();
+  drawParticles();
+  drawBoat();
+  drawFireball();
+  drawDamageNumbers();
+  drawUI();
+  drawShop();
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
 </script>
 </body>
 </html>
